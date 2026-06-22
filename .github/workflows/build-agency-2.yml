@@ -63,13 +63,18 @@ jobs:
           git push origin ":refs/tags/$TAG" 2>/dev/null || true
 
           gh release create "$TAG" \
-            output/agency-2/CLUJ.zip \
+            output/agency-2/agency-2-gtfs.zip \
+            output/agency-2/agency-2-schedule.json \
             --title "CTP Cluj GTFS — $DATE" \
             --notes "Daily GTFS build for CTP Cluj-Napoca (agency 2).
 
           hash: $HASH
           generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
           trips: $(grep -c '' output/agency-2/trips.txt)
-          stop_times: $(grep -c '' output/agency-2/stop_times.txt)"
+          stop_times: $(grep -c '' output/agency-2/stop_times.txt)
+
+          Assets:
+          - agency-2-gtfs.zip: raw GTFS (for validation/interop)
+          - agency-2-schedule.json: compact payload (consumed directly by neary app)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -261,9 +261,8 @@ function computeHash(gtfs) {
 }
 
 async function createZip() {
-  // Dynamic import archiver (it's a dependency)
   const { default: archiver } = await import('archiver');
-  const zipPath = join(outputDir, 'CLUJ.zip');
+  const zipPath = join(outputDir, `agency-${agencyId}-gtfs.zip`);
   const output = createWriteStream(zipPath);
   const archive = archiver('zip', { zlib: { level: 9 } });
 
@@ -276,6 +275,91 @@ async function createZip() {
     }
     archive.finalize();
   });
+}
+
+/**
+ * Generate the CompactSchedulePayload JSON — the same format the neary client
+ * consumes directly (matching `src/types/schedule.ts` in the neary app). This
+ * lets the neary app fetch this file directly (via Netlify proxy) instead of
+ * running its own server-side ZIP → parse → compact → blob pipeline.
+ *
+ * The format deduplicates stop-time patterns: trips sharing the same stop
+ * sequence (with offsets from trip start) share a single pattern entry.
+ */
+function generateCompactScheduleJson(allSchedules) {
+  const patterns = [];
+  const patternIndexByKey = new Map();
+  const trips = {};
+  const tripServiceMap = {};
+  const tripRouteMap = {};
+  const tripHeadsignMap = {};
+
+  for (const schedule of allSchedules) {
+    const { routeId, serviceId, departures, dir, stopSequence, headsign } = schedule;
+    for (let seq = 0; seq < departures.length; seq++) {
+      const depTime = departures[seq];
+      const tripId = `${routeId}_${dir}_${serviceId}_${seq}_${depTime.replace(':', '')}`;
+      const startSec = timeToSeconds(depTime);
+      const stopTimes = interpolateStopTimes(startSec, stopSequence);
+      const startMin = Math.floor(startSec / 60);
+
+      // Build the pattern as offsets from trip start (minutes)
+      const patternStops = stopSequence.map((stop, i) => ({
+        s: stop.stopId,
+        q: i,
+        a: Math.round((stopTimes[i] - startSec) / 60),
+        d: Math.round((stopTimes[i] - startSec) / 60),
+      }));
+
+      // Dedupe key: stop_id sequence + offsets
+      const key = patternStops.map(p => `${p.s},${p.q},${p.a},${p.d}`).join(';');
+      let patternIdx = patternIndexByKey.get(key);
+      if (patternIdx === undefined) {
+        patternIdx = patterns.length;
+        patterns.push(patternStops);
+        patternIndexByKey.set(key, patternIdx);
+      }
+
+      trips[tripId] = { p: patternIdx, t: startMin, s: serviceId, r: routeId, h: headsign };
+      tripServiceMap[tripId] = serviceId;
+      tripRouteMap[tripId] = routeId;
+      if (headsign) tripHeadsignMap[tripId] = headsign;
+    }
+  }
+
+  // Calendar: read from the generated calendar.txt (already in memory as gtfs object)
+  const today = new Date();
+  const startDate = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}01`;
+  const endMonth = new Date(today.getFullYear(), today.getMonth() + 6, 0);
+  const endDate = `${endMonth.getFullYear()}${String(endMonth.getMonth() + 1).padStart(2, '0')}${String(endMonth.getDate()).padStart(2, '0')}`;
+
+  const calendar = [
+    { serviceId: 'LV', monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false, startDate, endDate },
+    { serviceId: 'S', monday: false, tuesday: false, wednesday: false, thursday: false, friday: false, saturday: true, sunday: false, startDate, endDate },
+    { serviceId: 'D', monday: false, tuesday: false, wednesday: false, thursday: false, friday: false, saturday: false, sunday: true, startDate, endDate },
+    { serviceId: 'LD', monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: true, sunday: true, startDate, endDate },
+  ];
+
+  return {
+    version: new Date().toISOString(),
+    agencyId: Number(agencyId),
+    patterns,
+    trips,
+    calendar,
+    calendarExceptions: [],
+  };
+}
+
+function writeCompactJson(allSchedules) {
+  const compact = generateCompactScheduleJson(allSchedules);
+  const jsonPath = join(outputDir, `agency-${agencyId}-schedule.json`);
+  writeFileSync(jsonPath, JSON.stringify(compact));
+  LOG(`Compact JSON: ${patterns_trips_summary(compact)}`);
+  return jsonPath;
+}
+
+function patterns_trips_summary(compact) {
+  return `${compact.patterns.length} patterns, ${Object.keys(compact.trips).length} trips`;
 }
 
 // ============================================================================
@@ -379,9 +463,12 @@ async function main() {
     LOG('Schedule data CHANGED — will publish new release.');
   }
 
-  // Create ZIP
+  // Create ZIP + compact JSON
   const zipPath = await createZip();
   LOG(`ZIP created: ${zipPath}`);
+
+  const jsonPath = writeCompactJson(allSchedules);
+  LOG(`JSON created: ${jsonPath}`);
 
   // Summary
   const tripCount = gtfs.tripsTxt.split('\n').length - 1;

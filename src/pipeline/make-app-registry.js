@@ -19,10 +19,10 @@ const SCHEMA_PATH = join(ROOT, 'schemas', 'feeds.schema.json');
 /**
  * @param {Array<object>} feedEntries - one per resolved feed, shape:
  *   {
- *     feed: <from resolve-feeds, possibly merged with deriveBbox fields>,
- *     gtfs: { localPath, sizeBytes, hash },
+ *     feed:   <from resolve-feeds.js>,
+ *     gtfs:   { localPath, sizeBytes, hash },
  *     sqlite: { localPath, sizeBytes } | null,
- *     bbox, center, agencies, validity,
+ *     bbox, center, agencies, timezone, validity,
  *   }
  */
 export function makeAppRegistry(feedEntries) {
@@ -33,19 +33,16 @@ export function makeAppRegistry(feedEntries) {
     generated_at: generatedAt,
     feeds: feedEntries.map((e) => {
       const f = e.feed;
-      // Prefer agencies parsed from the actual GTFS agency.txt over what
-      // resolve-feeds optimistically populated.
-      const agencies = e.agencies && e.agencies.length > 0 ? e.agencies : f.agencies;
       return {
         id: f.id,
         name: f.name,
         country: f.country,
         ...(f.region != null ? { region: f.region } : {}),
         timezone: f.timezone ?? e.timezone ?? 'UTC',
-        ...(f.languages && f.languages.length ? { languages: f.languages } : {}),
+        ...(f.languages?.length ? { languages: f.languages } : {}),
         bbox: e.bbox,
         center: e.center,
-        agencies,
+        agencies: e.agencies, // canonical: parsed from agency.txt by derive-bbox
         source: f.source,
         files: {
           gtfs_zip: `feeds/${f.id}.gtfs.zip`,
@@ -59,7 +56,7 @@ export function makeAppRegistry(feedEntries) {
         generated_at: generatedAt,
         valid_from: e.validity?.from ?? null,
         valid_until: e.validity?.until ?? null,
-        ...(f.realtime ? { realtime: f.realtime } : { realtime: null }),
+        realtime: f.realtime ?? null,
         ...(f.tranzy ? { tranzy: f.tranzy } : {}),
         license: f.license,
       };

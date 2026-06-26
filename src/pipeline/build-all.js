@@ -3,19 +3,18 @@
 /**
  * build-all.js — daily orchestrator.
  *
- *   1. resolve-feeds — what are we building today?
- *   2. for each feed: fetch-gtfs (build locally or download upstream)
- *   3.                derive-bbox (read stops.txt → bbox, agencies, validity)
- *   4.                make-sqlite (M2+; stubbed null in M1)
- *   5. make-app-registry → outputs/feeds.json (schema-validated)
+ *   1. resolve-feeds       — what are we building today?
+ *   2. for each feed: fetch-gtfs   (build locally or download upstream)
+ *                     derive-bbox  (read stops/agency/feed_info.txt)
+ *                     make-sqlite  (gtfs.zip → sqlite3.gz)
+ *   3. make-app-registry → outputs/feeds.json (schema-validated)
  *
  * Output layout (under `outputs/`):
  *   outputs/feeds.json
  *   outputs/feeds/<id>.gtfs.zip
- *   outputs/feeds/<id>.sqlite3.gz   (when M2 lands)
+ *   outputs/feeds/<id>.sqlite3.gz
  *
- * Publish: see .github/workflows/daily.yml — pushes outputs/ to the
- * `binaries-staging` branch (M1) / `binaries` branch (M2+).
+ * Publish: .github/workflows/daily.yml pushes outputs/ to binaries-staging.
  */
 
 import { resolveFeeds } from './resolve-feeds.js';

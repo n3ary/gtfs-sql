@@ -32,11 +32,10 @@ const ENTITY_TYPE_TO_FIELD = {
   sa: 'service_alerts',
 };
 
+import { UA, fetchJson } from './http.js';
+
 function ghHeaders() {
-  const h = {
-    'User-Agent': 'neary-gtfs/2.0 (https://github.com/ciotlosm/neary-gtfs)',
-    'Accept': 'application/vnd.github.v3+json',
-  };
+  const h = { Accept: 'application/vnd.github.v3+json' };
   if (process.env.GITHUB_TOKEN) h.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   return h;
 }
@@ -44,9 +43,7 @@ function ghHeaders() {
 let _treeCache = null;
 async function getRtCatalogPaths() {
   if (_treeCache) return _treeCache;
-  const res = await fetch(TREE_URL, { headers: ghHeaders() });
-  if (!res.ok) throw new Error(`MDB tree fetch failed: HTTP ${res.status}`);
-  const tree = await res.json();
+  const tree = await fetchJson(TREE_URL, ghHeaders());
   _treeCache = tree.tree
     .filter((n) => n.type === 'blob'
       && n.path.startsWith('catalogs/sources/gtfs/realtime/')
@@ -74,7 +71,7 @@ export async function realtimeFromMdb(mdbIds) {
       console.warn(`[mdb-rt] no catalog file ending with ${suffix}`);
       continue;
     }
-    const res = await fetch(`${RAW_BASE}/${path}`, { headers: { 'User-Agent': 'neary-gtfs/2.0' } });
+    const res = await fetch(`${RAW_BASE}/${path}`, { headers: { 'User-Agent': UA } });
     if (!res.ok) {
       console.warn(`[mdb-rt] fetch ${path}: HTTP ${res.status}`);
       continue;

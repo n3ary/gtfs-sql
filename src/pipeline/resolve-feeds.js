@@ -20,6 +20,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { fetchJson } from './lib/http.js';
 import { resolveRealtimeForName } from './lib/mdb-rt.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,7 @@ const ROOT = join(__dirname, '..', '..');
 const FEEDS_DIR = join(ROOT, 'feeds');
 
 const TRANSITOUS_RAW = 'https://raw.githubusercontent.com/public-transport/transitous/main/feeds';
+const TRANSITOUS_GTFS_BASE = 'https://api.transitous.org/gtfs';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Local enhancement layers (auto-discovered from feeds/<id>/config.json)
@@ -52,12 +54,7 @@ function loadEnhancers() {
 // ───────────────────────────────────────────────────────────────────────────
 
 async function fetchTransitousCountry(iso) {
-  const url = `${TRANSITOUS_RAW}/${iso}.json`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'neary-gtfs/2.0 (https://github.com/ciotlosm/neary-gtfs)' },
-  });
-  if (!res.ok) throw new Error(`Transitous fetch failed for ${iso}: HTTP ${res.status}`);
-  return res.json();
+  return fetchJson(`${TRANSITOUS_RAW}/${iso}.json`);
 }
 
 function defaultSlug(name) {
@@ -65,8 +62,11 @@ function defaultSlug(name) {
 }
 
 /**
- * Build a feed object from a Transitous source, optionally promoted to
- * a local enhancement build.
+ * Build a feed object from a Transitous source.
+ *
+ * Strategy: build the Transitous-derived base once, then if an enhancer
+ * is present, overlay only the fields it explicitly sets — single source
+ * of truth for "what fields exist" (the base).
  */
 function projectFeed(iso, raw, enhancer, mdbRealtime) {
   if (!raw.name) return { skip: 'missing name' };
@@ -74,14 +74,19 @@ function projectFeed(iso, raw, enhancer, mdbRealtime) {
     return { skip: `unsupported source type: ${raw.type}` };
   }
 
-  // Common Transitous metadata
-  const transitousFallback = {
+  const base = {
     id: defaultSlug(raw.name),
     name: raw.name,
     country: iso.toUpperCase(),
     region: null,
     timezone: null,
     languages: [],
+    source: {
+      type: 'transitous',
+      publisher: `Transitous (${raw.type})`,
+      upstream_url: raw.url ?? null,
+    },
+    agencies: [], // derive-bbox re-reads agency.txt; this is just a placeholder
     realtime: mdbRealtime,
     tranzy: null,
     license: {
@@ -91,46 +96,33 @@ function projectFeed(iso, raw, enhancer, mdbRealtime) {
     },
   };
 
-  if (enhancer) {
-    const c = enhancer.cfg;
-    return {
-      feed: {
-        id: c.id ?? enhancer.dir,
-        name: c.name ?? transitousFallback.name,
-        country: c.country ?? transitousFallback.country,
-        region: c.region ?? null,
-        timezone: c.timezone ?? null,
-        languages: c.languages ?? [],
-        source: {
-          type: 'build',
-          publisher: 'neary-gtfs',
-          upstream_url: `https://api.transitous.org/gtfs/${iso.toLowerCase()}_${encodeURIComponent(raw.name)}.gtfs.zip`,
-        },
-        agencies: [],
-        // Config-supplied realtime overrides MDB-discovered URLs.
-        // This is the escape hatch for feeds whose RT URLs aren't in MDB
-        // or where we need to point at a proxy/cached endpoint.
-        realtime: c.realtime ?? mdbRealtime,
-        tranzy: c.tranzy ?? null,
-        license: {
-          spdx_identifier: c.license?.spdx_identifier ?? transitousFallback.license.spdx_identifier,
-          attribution_text: c.license?.attribution_text ?? transitousFallback.license.attribution_text,
-          attribution_url: c.license?.attribution_url ?? transitousFallback.license.attribution_url,
-        },
-        _enhances: { iso, transitousName: raw.name, feedDir: enhancer.dir },
-      },
-    };
-  }
+  if (!enhancer) return { feed: base };
 
+  // Overlay enhancer fields. Each one is "??" — config supplies wins,
+  // otherwise inherit from Transitous base.
+  const c = enhancer.cfg;
   return {
     feed: {
-      ...transitousFallback,
+      ...base,
+      id: c.id ?? enhancer.dir,
+      name: c.name ?? base.name,
+      country: c.country ?? base.country,
+      region: c.region ?? null,
+      timezone: c.timezone ?? null,
+      languages: c.languages ?? [],
       source: {
-        type: 'transitous',
-        publisher: `Transitous (${raw.type})`,
-        upstream_url: raw.url ?? null,
+        type: 'build',
+        publisher: 'neary-gtfs',
+        upstream_url: `${TRANSITOUS_GTFS_BASE}/${iso.toLowerCase()}_${encodeURIComponent(raw.name)}.gtfs.zip`,
       },
-      agencies: [],
+      realtime: c.realtime ?? mdbRealtime,
+      tranzy: c.tranzy ?? null,
+      license: {
+        spdx_identifier: c.license?.spdx_identifier ?? base.license.spdx_identifier,
+        attribution_text: c.license?.attribution_text ?? base.license.attribution_text,
+        attribution_url: c.license?.attribution_url ?? base.license.attribution_url,
+      },
+      _enhances: { iso, transitousName: raw.name, feedDir: enhancer.dir },
     },
   };
 }

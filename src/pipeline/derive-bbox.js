@@ -1,65 +1,27 @@
 /**
- * derive-bbox.js — read stops.txt from a GTFS .zip and return:
+ * derive-bbox.js — read a few .txt entries from a GTFS .zip and return:
  *   - bbox: { minLat, minLon, maxLat, maxLon }
  *   - center: bbox midpoint
- *   - agencies: array parsed from agency.txt
+ *   - agencies: parsed from agency.txt
+ *   - timezone: from agency.txt (first non-empty agency_timezone)
  *   - validity: { from, until } parsed from feed_info.txt (nullable)
  *
- * Uses the system `unzip` binary (present on every Linux CI runner and
- * macOS) to avoid pulling a zip-reader dependency. The data we need is
- * tiny so streaming a few `unzip -p` calls is faster than parsing the
- * full archive in JS.
+ * Uses the system `unzip` binary — present on every Linux CI runner +
+ * macOS, avoids pulling a zip-reader dep just to read 3 small files.
  */
 
 import { spawnSync } from 'node:child_process';
+
+import { parseCsv } from './lib/csv.js';
 
 function readEntry(zipPath, entryName) {
   const res = spawnSync('unzip', ['-p', zipPath, entryName], {
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
   });
-  if (res.status !== 0 && res.status !== null) {
-    // Some entries (feed_info.txt) are optional; surface as null.
-    return null;
-  }
+  // Optional entries (feed_info.txt) — return null so caller can skip.
+  if (res.status !== 0 && res.status !== null) return null;
   return res.stdout || null;
-}
-
-/**
- * Tiny CSV parser sufficient for GTFS plain-comma files. Does NOT handle
- * embedded quoted commas if any field both has commas AND quotes; GTFS
- * stops.txt / agency.txt almost never do, but if needed we can swap in a
- * full RFC 4180 parser later.
- */
-function parseCsv(text) {
-  const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
-  if (lines.length === 0) return [];
-  const header = parseLine(lines[0]);
-  return lines.slice(1).map((line) => {
-    const cols = parseLine(line);
-    const row = {};
-    header.forEach((key, i) => { row[key] = cols[i] ?? ''; });
-    return row;
-  });
-}
-
-function parseLine(line) {
-  const out = [];
-  let cur = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === '"') {
-      if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
-      else inQuotes = !inQuotes;
-    } else if (c === ',' && !inQuotes) {
-      out.push(cur); cur = '';
-    } else {
-      cur += c;
-    }
-  }
-  out.push(cur);
-  return out;
 }
 
 export function deriveBbox(zipPath) {

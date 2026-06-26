@@ -6,25 +6,16 @@
  * Cluj enhancement build expects.
  */
 
-import { copyFileSync, mkdtempSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { parseGtfsCsv } from './csv.js';
+import { parseCsv } from '../../../src/pipeline/lib/csv.js';
+import { fetchToFile } from '../../../src/pipeline/lib/http.js';
 
 const REQUIRED = ['agency.txt', 'routes.txt', 'stops.txt', 'trips.txt', 'stop_times.txt'];
 const OPTIONAL = ['shapes.txt', 'calendar.txt', 'calendar_dates.txt', 'feed_info.txt'];
-
-async function fetchToFile(url, dest) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'neary-gtfs/2.0 (https://github.com/ciotlosm/neary-gtfs)' },
-  });
-  if (!res.ok || !res.body) throw new Error(`fetch ${url}: HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  writeFileSync(dest, buf);
-  return dest;
-}
 
 /**
  * @param {string} source  absolute file path OR http(s) URL
@@ -52,10 +43,10 @@ export async function loadSeed(source) {
   }
 
   const agencyTxt = readFileSync(join(seedDir, 'agency.txt'), 'utf8');
-  const routesRows = parseGtfsCsv(readFileSync(join(seedDir, 'routes.txt'), 'utf8'));
-  const stopsRows = parseGtfsCsv(readFileSync(join(seedDir, 'stops.txt'), 'utf8'));
-  const tripsRows = parseGtfsCsv(readFileSync(join(seedDir, 'trips.txt'), 'utf8'));
-  const stopTimesRows = parseGtfsCsv(readFileSync(join(seedDir, 'stop_times.txt'), 'utf8'));
+  const routesRows = parseCsv(readFileSync(join(seedDir, 'routes.txt'), 'utf8'));
+  const stopsRows = parseCsv(readFileSync(join(seedDir, 'stops.txt'), 'utf8'));
+  const tripsRows = parseCsv(readFileSync(join(seedDir, 'trips.txt'), 'utf8'));
+  const stopTimesRows = parseCsv(readFileSync(join(seedDir, 'stop_times.txt'), 'utf8'));
 
   const routes = routesRows.map((r) => ({
     routeId: r.route_id,

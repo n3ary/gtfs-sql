@@ -42,17 +42,19 @@ export function makeAppRegistry(feedEntries) {
         ...(f.languages?.length ? { languages: f.languages } : {}),
         bbox: e.bbox,
         center: e.center,
-        agencies: e.agencies, // canonical: parsed from agency.txt by derive-bbox
+        agencies: e.agencies,
         source: f.source,
         files: {
-          gtfs_zip: `feeds/${f.id}.gtfs.zip`,
+          gtfs_zip: e.gtfs.localPath ? `feeds/${f.id}.gtfs.zip` : null,
           sqlite_gz: e.sqlite ? `feeds/${f.id}.sqlite3.gz` : null,
         },
         size_bytes: {
           gtfs_zip: e.gtfs.sizeBytes,
           sqlite_gz: e.sqlite ? e.sqlite.sizeBytes : null,
         },
-        hash: e.gtfs.hash,
+        // hash = sha256 of the .sqlite3.gz (what the app actually downloads).
+        // The .gtfs.zip hash is in gtfs.hash but isn't the freshness primitive.
+        hash: e.sqlite?.hash ?? e.gtfs.hash ?? null,
         generated_at: generatedAt,
         valid_from: e.validity?.from ?? null,
         valid_until: e.validity?.until ?? null,

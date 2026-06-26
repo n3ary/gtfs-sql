@@ -80,20 +80,20 @@
         },
         "files": {
           "type": "object",
-          "required": ["gtfs_zip"],
+          "required": ["sqlite_gz"],
           "additionalProperties": false,
           "properties": {
-            "gtfs_zip":  { "type": "string", "minLength": 1 },
-            "sqlite_gz": { "type": ["string", "null"], "minLength": 1 }
+            "gtfs_zip":  { "type": ["string", "null"], "minLength": 1 },
+            "sqlite_gz": { "type": "string", "minLength": 1 }
           }
         },
         "size_bytes": {
           "type": "object",
-          "required": ["gtfs_zip"],
+          "required": ["sqlite_gz"],
           "additionalProperties": false,
           "properties": {
-            "gtfs_zip":  { "type": "integer", "minimum": 0 },
-            "sqlite_gz": { "type": ["integer", "null"], "minimum": 0 }
+            "gtfs_zip":  { "type": ["integer", "null"], "minimum": 0 },
+            "sqlite_gz": { "type": "integer", "minimum": 0 }
           }
         },
         "hash":         { "type": "string", "pattern": "^sha256-[a-f0-9]{64}$" },

@@ -18,11 +18,10 @@ import { parse } from 'csv-parse/sync';
 import StreamZip from 'node-stream-zip';
 
 import { createGzip } from 'node:zlib';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pipeline } from 'node:stream/promises';
-
+import { pipeline } from 'node:stream/promises';import { createHash } from 'node:crypto';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
 const OUTPUTS = join(ROOT, 'outputs', 'feeds');
@@ -199,8 +198,8 @@ function insertRows(db, tableName, columns, rows) {
 
 /**
  * @param {string} gtfsZipPath  absolute path to a GTFS .zip
- * @param {string} feedId       e.g. "ctp-cluj"
- * @returns {Promise<{ localPath: string, sizeBytes: number } | null>}
+ * @param {string} feedId       e.g. "cluj-napoca"
+ * @returns {Promise<{ localPath: string, sizeBytes: number, hash: string } | null>}
  */
 export async function makeSqlite(gtfsZipPath, feedId) {
   mkdirSync(OUTPUTS, { recursive: true });
@@ -236,6 +235,8 @@ export async function makeSqlite(gtfsZipPath, feedId) {
   const rawSize = statSync(dbPath).size;
   unlinkSync(dbPath); // keep only the .gz
 
+  const hash = 'sha256-' + createHash('sha256').update(readFileSync(gzPath)).digest('hex');
+
   console.log(`[make-sqlite] ${feedId}: raw=${(rawSize / 1024).toFixed(1)}KB gz=${(sizeBytes / 1024).toFixed(1)}KB (${((sizeBytes / rawSize) * 100).toFixed(0)}%)`);
-  return { localPath: gzPath, sizeBytes };
+  return { localPath: gzPath, sizeBytes, hash };
 }

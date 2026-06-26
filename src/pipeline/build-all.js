@@ -24,6 +24,8 @@ import { makeSqlite } from './make-sqlite.js';
 import { makeAppRegistry } from './make-app-registry.js';
 import { validate } from './validate.js';
 
+import { existsSync, unlinkSync } from 'node:fs';
+
 async function main() {
   const t0 = Date.now();
   const feeds = await resolveFeeds();
@@ -34,14 +36,25 @@ async function main() {
     console.log(`\n=== ${feed.id} (${feed.source.type}) ===`);
     try {
       const gtfs = await fetchGtfs(feed);
-      // Validate only what we BUILD; Transitous mirrors are already
-      // validated upstream and re-validating is redundant churn.
       if (feed.source.type === 'build') {
         const { warnings } = validate(gtfs.localPath);
         for (const w of warnings) console.warn(`[validate] ${feed.id}: WARN ${w}`);
       }
       const meta = deriveBbox(gtfs.localPath);
       const sqlite = await makeSqlite(gtfs.localPath, feed.id);
+
+      // Drop the .gtfs.zip for plain mirrors — it's byte-identical to
+      // Transitous's already-published copy at source.upstream_url, and
+      // the app only consumes .sqlite3.gz. Local builds (cluj-napoca)
+      // keep the .zip — it's our own output + needed for the future
+      // upstream Transitous PR (M4).
+      if (feed.source.type === 'transitous' && existsSync(gtfs.localPath)) {
+        unlinkSync(gtfs.localPath);
+        gtfs.localPath = null;
+        gtfs.sizeBytes = null;
+        gtfs.hash = null;
+      }
+
       entries.push({ feed, gtfs, sqlite, ...meta });
       console.log(
         `[build-all] ${feed.id}: bbox=[${meta.bbox.minLat},${meta.bbox.minLon}]..[${meta.bbox.maxLat},${meta.bbox.maxLon}], gtfs=${(gtfs.sizeBytes / 1024).toFixed(1)}KB sqlite_gz=${sqlite ? (sqlite.sizeBytes / 1024).toFixed(1) + 'KB' : 'n/a'}`,

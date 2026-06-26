@@ -34,9 +34,7 @@ jobs:
           STRICT: 'true'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to ${{ env.PUBLISH_BRANCH }}
-        run: |
-          DATE=$(date -u binaries
+      - name: Publish to binaries
         run: |
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
@@ -47,6 +45,8 @@ jobs:
             git clone --depth 1 "$REMOTE" "$DIR"
             cd "$DIR"
             git checkout --orphan binaries
+            git rm -rf . >/dev/null
+            cd -
           fi
 
           cp -r outputs/* "$DIR/"
@@ -58,7 +58,7 @@ jobs:
             echo "no changes to publish"
           else
             git commit -m "pipeline: $DATE"
-            git push origin "$PUBLISH_BRANCH"
+            git push origin binaries
           fi
-        env:binaries
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

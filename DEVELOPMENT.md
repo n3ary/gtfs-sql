@@ -21,11 +21,11 @@ npm install
 # Full pipeline → outputs/
 npm run pipeline
 
-# Just the Cluj feed build → outputs/feeds/ctp-cluj.gtfs.zip
-npm run build:ctp-cluj
+# Just the Cluj feed build → outputs/feeds/cluj-napoca.gtfs.zip
+npm run build:cluj-napoca
 
 # Local end-to-end smoke against an existing zip at
-# outputs/feeds/ctp-cluj.gtfs.zip (skips fetch + build steps)
+# outputs/feeds/cluj-napoca.gtfs.zip (skips fetch + build steps)
 node src/pipeline/_smoke.js
 ```
 
@@ -59,7 +59,7 @@ apply (CTP Cluj's case: fresh CSV schedules vs months-stale mdb-2121).
 1. Do step 1–3 above so the Transitous source is in `include[]`.
 2. `mkdir feeds/<your-id>` (the dir name is yours; it becomes the
    feed id in `feeds.json` unless `config.json` overrides via `id`).
-3. Write `feeds/<your-id>/config.json` (see [`feeds/ctp-cluj/config.json`](feeds/ctp-cluj/config.json)).
+3. Write `feeds/<your-id>/config.json` (see [`feeds/cluj-napoca/config.json`](feeds/cluj-napoca/config.json)).
    Required at top level: `enhances: "<TransitousName>"`, plus
    `name`, `country`, `timezone`, `license`. Optional: `region`,
    `languages`, `realtime`, `tranzy`.
@@ -76,7 +76,7 @@ sources (in `include[]` but no enhancer) are the default case.
 
 CTP publishes CSV files at `https://ctpcj.ro/orare/csv/orar_<route>_<service>.csv`.
 - Service IDs: `lv` (weekday), `s` (Saturday), `d` (Sunday)
-- URL pattern + service mapping in [`feeds/ctp-cluj/config.json`](feeds/ctp-cluj/config.json)
+- URL pattern + service mapping in [`feeds/cluj-napoca/config.json`](feeds/cluj-napoca/config.json)
 - Routes without CSV data are skipped (logged); their structural data
   (route + stops + shapes) is preserved from the seed zip — the v2 app
   treats them as sparse-schedule feeds, not missing.
@@ -84,6 +84,5 @@ CTP publishes CSV files at `https://ctpcj.ro/orare/csv/orar_<route>_<service>.cs
 ## CI
 
 `.github/workflows/daily.yml` runs nightly (00:30 UTC) and on
-`workflow_dispatch`, targeting the `binaries-staging` branch. Once
-end-to-end CI is verified, the publish target is renamed to `binaries`
-(one-line edit) and jsDelivr is fronted onto raw GitHub URLs.
+`workflow_dispatch`, targeting the `binaries` branch. App consumes from
+`https://cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/feeds.json`.

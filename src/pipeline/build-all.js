@@ -14,7 +14,7 @@
  *   outputs/feeds/<id>.gtfs.zip
  *   outputs/feeds/<id>.sqlite3.gz
  *
- * Publish: .github/workflows/daily.yml pushes outputs/ to binaries-staging.
+ * Publish: .github/workflows/daily.yml pushes outputs/ to binaries.
  */
 
 import { resolveFeeds } from './resolve-feeds.js';

@@ -1,36 +1,81 @@
 # neary-gtfs
 
-Daily pipeline producing GTFS feeds for the [neary](https://github.com/ciotlosm/neary) PWA v2.
+> Multi-feed GTFS publisher for the [neary](https://github.com/ciotlosm/neary)
+> v2 PWA. Live registry: [`feeds.json`](https://cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/feeds.json).
 
-Roadmap: [neary docs/rebuild-v2/neary-gtfs-plan.md §10](https://github.com/ciotlosm/neary/blob/rebuild/v2-svelte-sqlite/docs/rebuild-v2/neary-gtfs-plan.md#10-evolution-roadmap).
-Current milestone: **M2** — SQLite generation + first Transitous-mirrored feed.
+Acts as a **thin curation layer on top of Transitous + MobilityData**:
+fetches their well-validated zips, optionally enhances them (Cluj gets
+fresh CTP CSV-scraped schedules), converts to SQLite for fast in-browser
+querying, and publishes one app-facing `feeds.json` registry.
 
-The legacy `releases` branch on the remote stays alive for the v1 PWA;
-nothing on `main` produces it anymore.
+## How it layers
+
+```
+              ┌──────────────────────────────────────────────┐
+              │ public-transport/transitous/feeds/ro.json    │
+              │ (community-curated source-of-truth catalog)  │
+              └────────────────┬─────────────────────────────┘
+                               │
+              ┌────────────────▼─────────────────────────────┐
+              │ countries.json: { countries, include[] }     │
+              │   ↳ pick which Transitous sources we publish │
+              └────────────────┬─────────────────────────────┘
+                               │
+        ┌──────────────────────┴────────────────────────────┐
+        │                                                   │
+        ▼ enhance (feeds/<id>/build.js exists)              ▼ mirror (no enhancer)
+┌────────────────────┐    ┌───────────────────────┐    ┌────────────────────────┐
+│ Transitous zip     │    │ ctpcj.ro CSV scrape   │    │ Transitous zip         │
+│ (Cluj-Napoca,      │───▶│ → cluj-napoca/        │    │ (Bucuresti-Ilfov, …)   │
+│  validated by MD)  │    │   build.js            │    │                        │
+└────────────────────┘    │ → fresh trips/        │    │                        │
+                          │   stop_times/calendar │    │                        │
+                          └─────────┬─────────────┘    └────────────┬───────────┘
+                                    │                                │
+                              ┌─────▼────────────────────────────────▼─────┐
+                              │ make-sqlite.js (gzipped SQLite blob)       │
+                              │ + derive-bbox + validate (built only)      │
+                              └──────────────────┬─────────────────────────┘
+                                                 │
+              ┌──────────────────────────────────▼───────────────────────────┐
+              │ outputs/feeds.json + outputs/feeds/*.sqlite3.gz              │
+              │ (RT URLs auto-resolved via MobilityData catalog)             │
+              └──────────────────────────────────┬───────────────────────────┘
+                                                 │
+                       push to `binaries` branch ▼
+              https://cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/...
+                                                 │
+                                                 ▼
+                            neary v2 PWA (downloads .sqlite3.gz into OPFS)
+```
+
+Three publishers, one app-facing registry — the v2 app doesn't have to
+know any of this. It fetches `feeds.json`, picks the user's feed by GPS
+bbox, downloads one `.sqlite3.gz` blob. Done.
 
 ## What it produces
 
-Published nightly to the `binaries-staging` branch by
-[`.github/workflows/daily.yml`](.github/workflows/daily.yml) (promotes
-to `binaries` once CI is verified end-to-end):
+Published nightly to the `binaries` branch by
+[`.github/workflows/daily.yml`](.github/workflows/daily.yml):
 
 | File | Source | Consumer |
 |------|--------|----------|
 | `feeds.json` | pipeline | neary v2 app (single registry) |
-| `feeds/<id>.gtfs.zip` | local build (ctp-cluj) / Transitous mirror | external validators |
-| `feeds/<id>.sqlite3.gz` | `make-sqlite.js` | neary v2 app (OPFS) |
+| `feeds/<id>.sqlite3.gz` | `make-sqlite.js` | neary v2 app (OPFS) — **always present** |
+| `feeds/<id>.gtfs.zip` | local enhancement (`feeds/<id>/build.js`) | external GTFS tools — **only for `source.type=='build'` feeds**; mirrors are accessible via Transitous's own URL |
 
-Current feeds (verified locally):
+Current feeds:
 
 | id | source | gtfs.zip | sqlite3.gz | rows |
 |---|---|---:|---:|---|
-| `ctp-cluj` | local CSV enhance | 1.7 MB | 5.4 MB | 14k trips · 193k stop_times · 70k shape pts |
-| `bucuresti-ilfov` | Transitous mirror | 7.8 MB | 25 MB | 63k trips · 1.33M stop_times · 82k shape pts |
+| `cluj-napoca` | local CSV enhance | 1.7 MB | 5.4 MB | 14k trips · 193k stop_times · 70k shape pts |
+| `bucuresti-ilfov` | Transitous mirror | — | 25 MB | 63k trips · 1.33M stop_times · 82k shape pts |
 
 `feeds.json` is Ajv-validated against
 [`schemas/feeds.schema.json`](schemas/feeds.schema.json) (draft-2020).
-The build also runs the canonical MobilityData GTFS validator on each
-zip and fails on any `ERROR`.
+Locally-built zips also get a light Node-side structural check
+([`src/pipeline/validate.js`](src/pipeline/validate.js)) — Transitous
+mirrors are trusted to upstream validation.
 
 ## Pipeline
 
@@ -55,24 +100,23 @@ zip and fails on any `ERROR`.
    - `make-sqlite.js` — `.zip` → `.sqlite3.gz`
 3. `make-app-registry.js` — write `outputs/feeds.json` (Ajv-validated).
 
-App consumes from:
+App consumes from (via jsDelivr):
 ```
-https://raw.githubusercontent.com/ciotlosm/neary-gtfs/binaries-staging/feeds.json
+https://cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/feeds.json
 ```
-(jsDelivr in front once `binaries-staging` is promoted to `binaries`.)
 
 ### CTP Cluj enhancement
 
-`feeds/ctp-cluj/` declares `enhances: "Cluj-Napoca"` in its `config.json`.
+`feeds/cluj-napoca/` declares `enhances: "Cluj-Napoca"` in its `config.json`.
 The pipeline:
 - Downloads `api.transitous.org/gtfs/ro_Cluj-Napoca.gtfs.zip` (Transitous
   serves the mdb-2121 mirror with its spec-compliance fixes applied)
-- Hands the path to `feeds/ctp-cluj/build.js`, which:
+- Hands the path to `feeds/cluj-napoca/build.js` via `NEARY_SEED_ZIP`, which:
   - Keeps `agency.txt`, `routes.txt`, `stops.txt`, `shapes.txt` from seed
   - **Regenerates** `calendar.txt`, `trips.txt`, `stop_times.txt` from
     daily CTP CSV scrapes (`ctpcj.ro/orare/csv/orar_<route>_<svc>.csv`)
   - Adds `feed_info.txt` with `feed_publisher_name="neary-gtfs"`
-  - Re-zips → `outputs/feeds/ctp-cluj.gtfs.zip`
+  - Re-zips → `outputs/feeds/cluj-napoca.gtfs.zip`
 
 Trip IDs follow the canonical CTP format
 `<route_id>_<dir>_<service>_<seq>_<HHMM>` (e.g. `45_1_LV_9_0721`),
@@ -91,11 +135,11 @@ src/pipeline/
   make-sqlite.js              # zip → .sqlite3.gz
   make-app-registry.js        # → outputs/feeds.json (Ajv-validated)
   _smoke.js                   # local end-to-end check
-feeds/ctp-cluj/               # the only custom-built feed
+feeds/cluj-napoca/              # the only locally-enhanced feed
   build.js                    # CSV enhance of CLUJ.zip
   config.json                 # CSV URL pattern, service IDs, ...
   lib/{csv,seed}.js           # parsers/loaders
-.github/workflows/daily.yml   # cron 00:30 UTC → binaries-staging
+.github/workflows/daily.yml   # cron 00:30 UTC → binaries
 ```
 
 ## Local development

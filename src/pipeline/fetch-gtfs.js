@@ -1,12 +1,13 @@
 /**
  * fetch-gtfs.js — produce a GTFS .zip on disk for one feed.
  *
- * - source.type === "build" (ctp-cluj): shells out to the legacy
- *   `src/build.js` which is unchanged from M0. Copies its output zip
- *   into outputs/feeds/<id>.gtfs.zip.
- * - source.type === "transitous" / "mobility-database": fetches from
- *   `api.transitous.org/gtfs/<name>.gtfs.zip` (M2+) or from the raw
- *   `source.upstream_url` directly. Stored under outputs/feeds/<id>.gtfs.zip.
+ *   source.type === "build"      → spawn the feed's own `build.js`
+ *                                  (path from feeds/<id>/config.json's
+ *                                  build.script, default "build.js").
+ *                                  The script is expected to write its
+ *                                  output to outputs/feeds/<id>.gtfs.zip.
+ *   source.type === "transitous" → download
+ *                                  api.transitous.org/gtfs/<iso>_<name>.gtfs.zip
  *
  * Returns: { localPath, sizeBytes, hash } for downstream stages.
  */
@@ -35,7 +36,6 @@ async function fetchToFile(url, dest) {
   if (!res.ok || !res.body) throw new Error(`fetch ${url}: HTTP ${res.status}`);
   const ws = createWriteStream(dest);
   const reader = res.body.getReader();
-  // Node 24+: Readable.from(asyncIterable) would be tidier, but this works.
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const { done, value } = await reader.read();
@@ -45,22 +45,13 @@ async function fetchToFile(url, dest) {
   await new Promise((r) => ws.end(r));
 }
 
-/**
- * Build the ctp-cluj GTFS by invoking our feed-local build script.
- * The new build (feeds/ctp-cluj/build.js) seeds from external.gtfs.ro's
- * CLUJ.zip and replaces calendar/trips/stop_times with fresh CTP CSV data.
- * No Tranzy dependency.
- */
-function buildCtpCluj() {
-  const result = spawnSync('node', ['feeds/ctp-cluj/build.js'], {
-    cwd: ROOT,
-    stdio: 'inherit',
-  });
-  if (result.status !== 0) {
-    throw new Error(`ctp-cluj build failed (exit code ${result.status})`);
-  }
-  // feeds/ctp-cluj/build.js writes directly to outputs/feeds/ctp-cluj.gtfs.zip
-  return join(OUTPUTS, 'ctp-cluj.gtfs.zip');
+function runLocalBuild(feedId) {
+  const cfg = JSON.parse(readFileSync(join(ROOT, 'feeds', feedId, 'config.json'), 'utf8'));
+  const script = cfg.build?.script ?? 'build.js';
+  const rel = join('feeds', feedId, script);
+  console.log(`[fetch-gtfs] ${feedId} ← node ${rel}`);
+  const r = spawnSync('node', [rel], { cwd: ROOT, stdio: 'inherit' });
+  if (r.status !== 0) throw new Error(`local build for ${feedId} failed (exit ${r.status})`);
 }
 
 /**
@@ -71,20 +62,16 @@ export async function fetchGtfs(feed) {
   mkdirSync(OUTPUTS, { recursive: true });
   const dest = join(OUTPUTS, `${feed.id}.gtfs.zip`);
 
-  if (feed.source.type === 'build' && feed.id === 'ctp-cluj') {
-    buildCtpCluj();
+  if (feed.source.type === 'build') {
+    runLocalBuild(feed.id);
   } else if (feed.source.type === 'transitous') {
     // Transitous's published GTFS zips follow the pattern
     //   https://api.transitous.org/gtfs/<iso>_<source-name>.gtfs.zip
-    // (the prefix avoids name collisions across countries). The
-    // upstream `source.url` from ro.json points at the producer, not
-    // the canonical post-fix Transitous output — use the API URL.
+    // (the iso prefix is required; without it the endpoint 404s).
     const isoLower = (feed.country || '').toLowerCase();
     const upstream = `${TRANSITOUS_GTFS_BASE}/${isoLower}_${encodeURIComponent(feed.name)}.gtfs.zip`;
     console.log(`[fetch-gtfs] ${feed.id} ← ${upstream}`);
     await fetchToFile(upstream, dest);
-  } else if (feed.source.type === 'mobility-database') {
-    throw new Error(`feed ${feed.id}: direct mobility-database fetch not implemented (use Transitous as the intermediary)`);
   } else {
     throw new Error(`feed ${feed.id}: unknown source.type "${feed.source.type}"`);
   }

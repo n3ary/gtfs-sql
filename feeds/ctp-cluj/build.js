@@ -38,16 +38,17 @@ const FEED_DIR = __dirname;
 const OUTPUTS = join(REPO_ROOT, 'outputs', 'feeds');
 
 const config = JSON.parse(readFileSync(join(FEED_DIR, 'config.json'), 'utf8'));
+const buildCfg = config.build;
 
 const LOG = (msg) => console.log(`[ctp-cluj] ${msg}`);
 
-LOG(`Building CTP Cluj GTFS — seed: ${config.seedZipUrl}`);
+LOG(`Building CTP Cluj GTFS — seed: ${buildCfg.seedZipUrl}`);
 
 // ──────────────────────────────────────────────────────────────────────────
 // Step 1: seed
 // ──────────────────────────────────────────────────────────────────────────
 
-const seed = await loadSeed(config.seedZipUrl);
+const seed = await loadSeed(buildCfg.seedZipUrl);
 
 // stop_id → {lat, lon} for distance interpolation
 const stopCoords = new Map(seed.stops.map((s) => [s.stopId, { lat: s.lat, lon: s.lon }]));
@@ -67,11 +68,11 @@ LOG(`patterns: ${patternByRouteDir.size}`);
 // Step 2: CSV scrape
 // ──────────────────────────────────────────────────────────────────────────
 
-const SERVICE_KEYS = ['lv', 's', 'd'];
-const SERVICE_MAP = { lv: 'LV', s: 'S', d: 'D' };
+const SERVICE_KEYS = buildCfg.serviceKeys;
+const SERVICE_MAP = buildCfg.serviceIdMap;
 
 async function fetchCsv(routeShortName, serviceKey) {
-  const url = config.csvUrlPattern
+  const url = buildCfg.csvUrlPattern
     .replace('{routeShortName}', routeShortName)
     .replace('{serviceId}', serviceKey);
   try {
@@ -279,7 +280,7 @@ const stopTimesTxt = stLines.join('\n') + '\n';
 
 const feedInfoTxt = [
   'feed_publisher_name,feed_publisher_url,feed_lang,feed_start_date,feed_end_date,feed_version',
-  `neary-gtfs,https://github.com/ciotlosm/neary-gtfs,${config.lang},${startDate},${endDate},${isoDate}`,
+  `neary-gtfs,https://github.com/ciotlosm/neary-gtfs,${config.languages[0] ?? 'en'},${startDate},${endDate},${isoDate}`,
 ].join('\n') + '\n';
 
 // ──────────────────────────────────────────────────────────────────────────

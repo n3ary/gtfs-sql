@@ -1,57 +1,67 @@
 /**
- * resolve-feeds.js — resolve the set of feeds we'll build/publish.
+ * resolve-feeds.js — produce the ordered list of feeds this run will build.
  *
- * Reads countries.json → for each ISO code, fetches the Transitous
- * `feeds/<iso>.json` from public-transport/transitous@main. Returns a
- * flat list of { id, name, country, source, realtime, license } that
- * the rest of the pipeline iterates over.
+ * Two sources:
  *
- * Special case: our own ctp-cluj feed is always prepended. Its
- * `source.type` is "build" — the pipeline runs `feeds/ctp-cluj/build.js`
- * (legacy `src/build.js` until M2) to produce the GTFS .zip locally.
+ *   1. **Local feeds** — each subdirectory of `feeds/` with a `config.json`
+ *      is a feed we build ourselves. Auto-discovered (no JS edits needed
+ *      to add another local feed). `config.json` must declare at least
+ *      `id`, `name`, `country`, plus a `build` block consumed by the
+ *      feed's own `build.js` (see feeds/ctp-cluj/config.json for shape).
  *
- * M1 scope note: only ctp-cluj is emitted by default — the
- * `RESOLVE_INCLUDE_TRANSITOUS=true` env flag opts into Transitous
- * resolution for testing. M2 flips this on by default with the first
- * non-Cluj feed (Bucharest).
+ *   2. **Transitous mirrors** — for each ISO code in `countries.json`,
+ *      fetch `feeds/<iso>.json` from public-transport/transitous@main and
+ *      mirror the entries whose `name` appears in `countries.json`'s
+ *      `include[]` whitelist. Their .zip comes from
+ *      `api.transitous.org/gtfs/<iso>_<name>.gtfs.zip`.
+ *
+ * Local feeds are emitted before Transitous mirrors so they appear first
+ * in `outputs/feeds.json` (UX nicety; the app picks by GPS bbox anyway).
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
+const FEEDS_DIR = join(ROOT, 'feeds');
 
 const TRANSITOUS_RAW = 'https://raw.githubusercontent.com/public-transport/transitous/main/feeds';
 
-/** Our locally-built feed. The pipeline shells out to `feeds/ctp-cluj/build.js`. */
-const CTP_CLUJ_FEED = {
-  id: 'ctp-cluj',
-  name: 'Cluj-Napoca',
-  country: 'RO',
-  region: 'Cluj',
-  timezone: 'Europe/Bucharest',
-  languages: ['ro'],
-  source: { type: 'build', publisher: 'neary-gtfs', upstream_url: null },
-  agencies: [
-    {
-      agency_id: '2',
-      agency_name: 'Compania de Transport Public Cluj-Napoca',
-      agency_url: 'https://www.ctpcluj.ro/',
-    },
-  ],
-  realtime: {
-    vehicle_positions: 'https://cluj-rt-feed.gtfs.ro/vehiclePositions',
-    trip_updates: 'https://cluj-rt-feed.gtfs.ro/tripUpdates',
-    service_alerts: 'https://cluj-rt-feed.gtfs.ro/serviceAlerts',
-  },
-  license: {
-    spdx_identifier: 'CC-BY-SA-4.0',
-    attribution_text: '© Compania de Transport Public Cluj-Napoca',
-    attribution_url: 'https://www.ctpcluj.ro/',
-  },
-};
+// ───────────────────────────────────────────────────────────────────────────
+// Local feeds (auto-discovered from feeds/<id>/config.json)
+// ───────────────────────────────────────────────────────────────────────────
+
+function loadLocalFeeds() {
+  if (!existsSync(FEEDS_DIR)) return [];
+  const out = [];
+  for (const entry of readdirSync(FEEDS_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const cfgPath = join(FEEDS_DIR, entry.name, 'config.json');
+    if (!existsSync(cfgPath)) continue;
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    out.push({
+      id: cfg.id ?? entry.name,
+      name: cfg.name,
+      country: cfg.country,
+      region: cfg.region ?? null,
+      timezone: cfg.timezone ?? null,
+      languages: cfg.languages ?? [],
+      source: { type: 'build', publisher: 'neary-gtfs', upstream_url: null },
+      // agencies[] is intentionally empty — derive-bbox re-reads agency.txt
+      // from the generated zip and that takes precedence (make-app-registry.js).
+      agencies: [],
+      realtime: cfg.realtime ?? null,
+      license: cfg.license,
+    });
+  }
+  return out;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Transitous mirrors (gated by countries.json include[] whitelist)
+// ───────────────────────────────────────────────────────────────────────────
 
 async function fetchTransitousCountry(iso) {
   const url = `${TRANSITOUS_RAW}/${iso}.json`;
@@ -62,37 +72,26 @@ async function fetchTransitousCountry(iso) {
   return res.json();
 }
 
-/**
- * Project a Transitous `sources[]` entry into our feed shape.
- *
- * Transitous schema (abbreviated):
- *   { name, type: "http"|"transitland-atlas"|..., url?, license, fix? }
- *
- * We're only interested in entries that resolve to a downloadable GTFS
- * zip — everything else is skipped with a warning.
- */
 function projectTransitousFeed(iso, raw) {
   if (!raw.name) return { skip: 'missing name' };
-  if (raw.type !== 'http' && raw.type !== 'transitland-atlas' && raw.type !== 'mobility-database') {
+  if (!['http', 'transitland-atlas', 'mobility-database'].includes(raw.type)) {
     return { skip: `unsupported source type: ${raw.type}` };
   }
-
   const id = String(raw.name).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
-
   return {
     feed: {
       id,
       name: raw.name,
       country: iso.toUpperCase(),
       region: null,
-      timezone: null, // derived later from feed_info.txt or upstream metadata
+      timezone: null,
       languages: [],
       source: {
         type: 'transitous',
         publisher: `Transitous (${raw.type})`,
         upstream_url: raw.url ?? null,
       },
-      agencies: [], // populated by fetch-gtfs after we read agency.txt
+      agencies: [],
       realtime: null,
       license: {
         spdx_identifier: raw.license?.['spdx-identifier'] ?? null,
@@ -103,22 +102,16 @@ function projectTransitousFeed(iso, raw) {
   };
 }
 
-/**
- * @returns {Promise<Array<object>>} resolved feeds in build order.
- *   ctp-cluj is always first; Transitous entries (filtered by the
- *   `include` whitelist in countries.json) follow.
- */
+// ───────────────────────────────────────────────────────────────────────────
+
 export async function resolveFeeds() {
   const config = JSON.parse(readFileSync(join(ROOT, 'countries.json'), 'utf8'));
   const countries = config.countries ?? [];
   const includeWhitelist = new Set(config.include ?? []);
 
-  const feeds = [CTP_CLUJ_FEED];
-
-  if (includeWhitelist.size === 0) {
-    console.log('[resolve-feeds] no Transitous includes whitelisted; ctp-cluj only.');
-    return feeds;
-  }
+  const localFeeds = loadLocalFeeds();
+  const localIds = new Set(localFeeds.map((f) => f.id));
+  const feeds = [...localFeeds];
 
   for (const iso of countries) {
     let payload;
@@ -137,14 +130,15 @@ export async function resolveFeeds() {
         console.warn(`[resolve-feeds] ${iso}/${raw.name}: skipped (${projected.skip})`);
         continue;
       }
-      // De-dup: a whitelisted name appearing multiple times (e.g. with a
-      // separate gtfs-rt sibling) shouldn't double-emit.
+      // Don't double-mirror something we already build locally.
+      if (localIds.has(projected.feed.id)) continue;
       if (seen.has(projected.feed.id)) continue;
       seen.add(projected.feed.id);
       feeds.push(projected.feed);
     }
   }
 
-  console.log(`[resolve-feeds] resolved ${feeds.length} feed(s): ${feeds.map((f) => f.id).join(', ')}`);
+  console.log(`[resolve-feeds] ${feeds.length} feed(s): ${feeds.map((f) => f.id).join(', ')}`);
   return feeds;
 }
+

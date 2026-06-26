@@ -34,7 +34,10 @@ duplicate the diagram here.
 
 ## Adding a feed
 
-Mirror an existing Transitous source (preferred):
+Two paths, depending on whether you want a Transitous mirror or your own
+custom build.
+
+### Mirror an existing Transitous source (preferred)
 
 1. Add the country's ISO code to `countries.json` `countries[]` (if not
    already present).
@@ -43,15 +46,31 @@ Mirror an existing Transitous source (preferred):
    The `name` field must resolve to
    `https://api.transitous.org/gtfs/<iso>_<name>.gtfs.zip` (200 OK).
 3. Add that name to `countries.json` `include[]`.
-4. Run `npm run pipeline` locally. Confirm
-   `outputs/feeds.json` validates and the per-feed `.sqlite3.gz` opens
-   in `sqlite3` (`sqlite3 outputs/feeds/<id>.sqlite3 'SELECT COUNT(*) FROM trips'`).
-5. Push to a branch and run the daily workflow via `workflow_dispatch`.
+4. Run `npm run pipeline` locally; confirm `outputs/feeds.json` validates
+   and the per-feed `.sqlite3.gz` opens
+   (`sqlite3 outputs/feeds/<id>.sqlite3 'SELECT COUNT(*) FROM trips'`).
+5. Push to a branch and trigger the daily workflow via `workflow_dispatch`.
 
-Local-build feed (only if Transitous coverage is unacceptable):
-copy the `feeds/ctp-cluj/` layout, wire it into `fetch-gtfs.js`. Avoid
-unless really necessary — Transitous gets free mdb-2121-style updates
-across ~100 downstream consumers.
+### Custom build (only when Transitous coverage is unacceptable)
+
+Local feeds are auto-discovered — drop a new directory under `feeds/`
+with a `config.json` and a `build.js` and the pipeline picks it up. No
+edits to JS in `src/pipeline/`.
+
+1. `mkdir feeds/<your-id> && cd feeds/<your-id>`
+2. Write `config.json` (use [`feeds/ctp-cluj/config.json`](feeds/ctp-cluj/config.json)
+   as the shape reference). Required keys at the top level:
+   `id`, `name`, `country`, `timezone`, `license`. Optional:
+   `region`, `languages`, `realtime`. Anything under `build.*` is
+   passed only to your `build.js` (script name defaults to `build.js`,
+   override via `build.script`).
+3. Write `build.js` — its only contract is: write a valid GTFS zip to
+   `outputs/feeds/<id>.gtfs.zip`. Use [`feeds/ctp-cluj/build.js`](feeds/ctp-cluj/build.js)
+   as a starting point if you need a CSV-enhancement pattern.
+4. Run `npm run pipeline` locally.
+
+Avoid the custom path when possible — Transitous gets free
+mdb-2121-style updates and reaches ~100 downstream consumers.
 
 ## CTP CSV schedule source
 

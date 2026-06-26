@@ -63,6 +63,20 @@ jobs:
 
           cp -r outputs/* "$DIR/"
           cd "$DIR"
+
+          # Prune orphan files in feeds/ that the new feeds.json no longer
+          # references. Without this, files dropped from publish policy
+          # (e.g. mirror .gtfs.zips after commit d5773bb) linger forever
+          # on the binaries branch. Single source of truth: feeds.json.
+          EXPECTED=$(jq -r '.feeds[] | (.files.gtfs_zip, .files.sqlite_gz) | select(.)' feeds.json | sort -u)
+          for f in feeds/*; do
+            [ -e "$f" ] || continue
+            if ! printf '%s\n' "$EXPECTED" | grep -qxF "$f"; then
+              echo "[publish] pruning orphan: $f"
+              rm -f "$f"
+            fi
+          done
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A

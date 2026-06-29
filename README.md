@@ -1,93 +1,85 @@
 # neary-gtfs
 
-Multi-feed GTFS publisher for the [neary](https://github.com/ciotlosm/neary) PWA.
+The app-side companion to a GTFS feed: turns one or more upstream
+`.gtfs.zip` URLs into the two things the [neary](https://github.com/ciotlosm/neary)
+PWA actually needs to render a city:
+
+1. A `.sqlite3.gz` blob per feed (the app's in-OPFS data store).
+2. A single `feeds.json` registry with everything else the app reads at
+   launch — bbox, center, timezone, agencies, license, realtime URLs,
+   optional Tranzy mapping, and the upstream ETag we use for
+   change-detection.
 
 > [!NOTE]
-> **Live registry** (single source of truth for what's currently published):
-> [`https://cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/feeds.json`](https://cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/feeds.json)
+> **Live registry**: [`https://cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/feeds.json`](https://cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/feeds.json)
 
-Acts as a **thin curation layer on top of Transitous + MobilityData**:
-fetches their well-validated zips, optionally enhances them (Cluj gets
-fresh CTP CSV-scraped schedules), converts to SQLite for fast in-browser
-querying, and publishes one app-facing `feeds.json` registry.
-
-## How it layers
-
-```mermaid
-flowchart TD
-    A["public-transport/transitous<br/><i>feeds/ro.json</i><br/>(community-curated catalog)"]
-    B["countries.json<br/><i>{ countries, include[] }</i>"]
-    A --> B
-
-    B -->|"each include[]<br/>name"| C{"local enhancer<br/>under feeds/?"}
-
-    C -->|"yes (cluj-napoca)"| D["fetch Transitous seed<br/><i>api.transitous.org/gtfs/...</i>"]
-    D --> E["feeds/cluj-napoca/build.js<br/>scrape ctpcj.ro CSV<br/>regenerate trips / stop_times / calendar"]
-
-    C -->|"no (bucuresti-ilfov, ...)"| F["fetch Transitous mirror<br/><i>api.transitous.org/gtfs/...</i><br/>(skip if upstream ETag unchanged)"]
-
-    E --> G["make-sqlite.js<br/>+ derive-bbox + validate<br/>(skip if content_hash unchanged)"]
-    F --> G
-
-    H["MobilityData catalog<br/><i>(RT URLs per mdb-id)</i>"] -.->|"auto-resolve realtime"| I
-
-    G --> I["outputs/feeds.json<br/>+ outputs/feeds/*.sqlite3.gz"]
-
-    I -->|"push to <code>binaries</code> branch"| J["jsDelivr CDN<br/><i>cdn.jsdelivr.net/gh/ciotlosm/neary-gtfs@binaries/...</i>"]
-    J --> K["neary PWA<br/>downloads .sqlite3.gz into OPFS"]
-```
-
-Three publishers (Transitous, MobilityData, us), one app-facing
-registry — the app doesn't have to know any of this. It fetches
-`feeds.json`, picks the user's feed by GPS bbox, downloads one
-`.sqlite3.gz` blob. Done.
+The repo deliberately does **not** produce GTFS — it consumes it. Where
+the zip comes from is a per-feed detail (Transitous mirror, sister-repo
+adapter, …) and lives in [`feeds/<id>/config.json`](feeds/).
 
 ## What it produces
 
 Published nightly to the `binaries` branch by
 [`.github/workflows/daily.yml`](.github/workflows/daily.yml):
 
-| File | Source | Consumer |
-|------|--------|----------|
-| `feeds.json` | pipeline | neary app (single registry) |
-| `feeds/<id>.sqlite3.gz` | [`make-sqlite.js`](src/pipeline/make-sqlite.js) | neary app (OPFS) — **always present** |
-| `feeds/<id>.gtfs.zip` | local enhancement ([`feeds/<id>/build.js`](feeds/)) | external GTFS tools — **only for `source.type === 'build'` feeds**; mirrors are accessible via Transitous's own URL |
+```
+binaries/feeds.json
+binaries/<id>.sqlite3.gz   ← one per feed listed in feeds.json
+```
 
-> [!NOTE]
-> `feeds.json` is Ajv-validated against
-> [`schemas/feeds.schema.json`](schemas/feeds.schema.json) (draft-2020).
-> Locally-built zips also get a light Node-side structural check
-> ([`src/pipeline/validate.js`](src/pipeline/validate.js)) — Transitous
-> mirrors are trusted to upstream validation.
+The raw `.gtfs.zip` is not republished — its upstream URL is in
+`source.upstream_url`, so any external GTFS tooling can pull it from
+the original publisher.
+
+`feeds.json` is Ajv-validated against
+[`schemas/feeds.schema.json`](schemas/feeds.schema.json) (draft-2020)
+on every build, so a malformed entry fails before publish.
+
+## How a feed gets there
+
+```mermaid
+flowchart LR
+    A["countries.json<br/>include[]"] --> B["resolve-feeds<br/>(consults Transitous catalog<br/>+ feeds/&lt;id&gt;/config.json)"]
+    B --> C{"per-feed<br/>source.type"}
+    C -->|transitous| D["api.transitous.org/gtfs/&lt;iso&gt;_&lt;name&gt;.gtfs.zip"]
+    C -->|remote| E["URL declared in<br/>feeds/&lt;id&gt;/config.json<br/>(e.g. cluj-napoca-gtfs-adapter)"]
+    D --> F["HEAD → ETag<br/>(skip if unchanged)"]
+    E --> F
+    F --> G["validate + smoke<br/>(remote only)"]
+    G --> H["derive-bbox<br/>+ make-sqlite"]
+    H --> I["feeds.json<br/>+ &lt;id&gt;.sqlite3.gz<br/>→ binaries branch"]
+    I --> J["jsDelivr → neary PWA<br/>(downloads sqlite3.gz into OPFS)"]
+```
+
+Two source flavors today:
+
+| `source.type` | Where the zip comes from | When to use |
+|---|---|---|
+| `transitous` | `api.transitous.org/gtfs/<iso>_<name>.gtfs.zip` | Default. Transitous's mirror is fine. |
+| `remote` | URL in `feeds/<id>/config.json` `source.url` | Transitous's mirror is stale and a sister repo publishes a better zip for the same operator (e.g. [`cluj-napoca-gtfs-adapter`](https://github.com/ciotlosm/cluj-napoca-gtfs-adapter)). |
+
+A `feeds/<id>/config.json` is also where you overlay app-side metadata
+on top of either source — `realtime` URLs, `tranzy` mapping, license
+text, a `smoke` contract block. See
+[`feeds/cluj-napoca/config.json`](feeds/cluj-napoca/config.json) for a
+worked example.
 
 ## Pipeline
 
-Daily orchestrator + helpers live in [`src/pipeline/`](src/pipeline/README.md) —
-see that README for the step-by-step build flow and the skip-on-unchanged
-mechanism. Run locally with `npm run pipeline`.
-
-### Locally-enhanced feeds
-
-Each subdirectory of `feeds/` documents its own enhancement:
-
-- [`feeds/cluj-napoca/`](feeds/cluj-napoca/README.md) — CTP Cluj
-  schedule enhancement (daily CSV scrape on top of the Transitous seed)
-
-> [!TIP]
-> To add another locally-enhanced feed, see
-> [DEVELOPMENT.md § Adding a feed](DEVELOPMENT.md#adding-a-feed).
-> No JS edits needed — drop a `feeds/<id>/config.json` with
-> `enhances: "<TransitousName>"` + a `build.js` and the pipeline
-> picks it up.
+Daily orchestrator + helpers live in [`src/pipeline/`](src/pipeline/README.md);
+that README has the step-by-step. Run locally with `npm run pipeline`.
 
 ## Structure
 
-The flow is in the [Mermaid diagram above](#how-it-layers); `ls -R src/pipeline feeds/` shows the file tree.
+The flow is in the [Mermaid diagram above](#how-a-feed-gets-there);
+`ls -R src/pipeline feeds/` shows the file tree.
 
 Two conceptual entry points worth knowing:
 
-- [`countries.json`](countries.json) — single source of truth for what we publish
-- [`feeds/<id>/`](feeds/) — drop a `config.json` with `enhances: "<TransitousName>"` + a `build.js` here to add a local enhancement layer over a Transitous mirror (no JS edits in `src/pipeline/`)
+- [`countries.json`](countries.json) — single source of truth for what
+  we publish (`include[]` lists Transitous source names).
+- [`feeds/<id>/config.json`](feeds/) — per-feed override. Optional; drop
+  one in to swap the source URL and/or overlay app-side metadata.
 
 ## Local development
 
@@ -95,4 +87,6 @@ See [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## License
 
-Schedule data © CTP Cluj-Napoca. Generated for public transit information purposes.
+Schedule data © its respective transit operators (per-feed
+`license.attribution_text` in `feeds.json`). Generated for public transit
+information purposes.

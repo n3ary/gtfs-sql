@@ -1,7 +1,7 @@
 # src/pipeline
 
-Daily build orchestrator and its helpers. See main
-[README.md](../../README.md#how-it-layers) for the higher-level data flow.
+The SQLite + registry build for the `binaries` branch. See
+[../../README.md](../../README.md) for what this repo is and isn't.
 
 ## Entry point
 
@@ -11,52 +11,59 @@ npm run pipeline            # = node src/pipeline/build-all.js
 
 ## Steps
 
-1. **`resolve-feeds.js`** — read [`countries.json`](../../countries.json)'s
+`build-all.js` walks each feed and runs:
+
+1. **`resolve-feeds.js`** — read [`countries.json`](../../countries.json)
    `include[]` (single source of truth for what we publish). For each
-   entry: fetch the matching source from Transitous's
-   `feeds/<iso>.json`. If a [`feeds/<id>/config.json`](../../feeds/)
-   declares `enhances: "<name>"` matching that Transitous source,
-   promote it to an enhanced build; otherwise plain mirror.
-2. **For each feed**:
-   - **`fetch-gtfs.js`**:
-     - Plain mirror → download `api.transitous.org/gtfs/<iso>_<name>.gtfs.zip`
-       (skipped entirely if upstream `ETag` matches previous run)
-     - Enhanced build → download the same Transitous zip as seed,
-       hand its path to `feeds/<id>/build.js` via `NEARY_SEED_ZIP`;
-       the script mutates the zip and writes the final
-       `outputs/feeds/<id>.gtfs.zip`
-   - **`validate.js`** (`source.type === 'build'` only) — light Node
-     spec-shape check (required files / columns, cross-references,
-     stop_sequence monotonicity). Transitous mirrors are trusted to
-     upstream validation.
-   - **`derive-bbox.js`** — `unzip -p` the zip's `stops.txt` /
-     `agency.txt` / `feed_info.txt` → bbox, agencies, timezone,
-     validity dates.
-   - **`make-sqlite.js`** — `.zip` → `.sqlite3.gz`. Skipped for
-     enhanced builds when the new zip's stable content-hash matches
-     the previous run.
-3. **`make-app-registry.js`** — write `outputs/feeds.json`
-   (Ajv-validated against [`schemas/feeds.schema.json`](../../schemas/feeds.schema.json)).
+   entry: fetch the matching source from Transitous's `feeds/<iso>.json`.
+   If a [`feeds/<id>/config.json`](../../feeds/) declares
+   `enhances: "<name>"` matching that Transitous source, apply its
+   overrides (source swap, realtime URLs, license, metadata).
+2. **HEAD `source.upstream_url`** — compare ETag against the previous
+   `feeds.json`. Match → pass the previous entry through unchanged,
+   skip everything below.
+3. **`fetch-gtfs.js`** — download the zip:
+   - `source.type=transitous` → `api.transitous.org/gtfs/<iso>_<name>.gtfs.zip`
+   - `source.type=remote`     → `source.upstream_url` from the override
+4. **`validate.js`** (`source.type=remote` only) — light Node spec-shape
+   check (required files / columns, cross-references, monotonic
+   `stop_sequence`). Transitous mirrors are trusted to upstream validation.
+5. **`smoke-remote.js`** (`source.type=remote` only) — per-feed contract
+   check from the override's `smoke` block (expected
+   `feed_publisher_name`, `trip_id` regex). Fails the build on
+   contract violation.
+6. **`derive-bbox.js`** — `unzip -p` the zip's `stops.txt` /
+   `agency.txt` / `feed_info.txt` → bbox, center, agencies, timezone,
+   validity dates.
+7. **`make-sqlite.js`** — `.zip` → `.sqlite3.gz`. The raw `.gtfs.zip`
+   is unlinked after; consumers fetch it from the upstream URL.
+8. **`make-app-registry.js`** — write Ajv-validated
+   [`outputs/feeds.json`](../../outputs/feeds.json).
+
+Output layout under `outputs/` (mirrors the `binaries` branch root):
+
+```
+outputs/feeds.json
+outputs/<id>.sqlite3.gz
+```
 
 ## Skip-on-unchanged
 
-Each `source` entry in `feeds.json` records a change-detection token:
+Each `feeds.json` entry records `source.upstream_etag` at build time.
+Next run, the orchestrator does a `HEAD` on `source.upstream_url`; if
+the ETag matches AND the previous `<id>.sqlite3.gz` is still
+referenced, the whole feed is reused from the previous registry — no
+download, no make-sqlite, no publish churn.
 
-| Source type | Token | Captured by | Compared by |
-|---|---|---|---|
-| `transitous` | `source.upstream_etag` | HTTP `HEAD` on upstream | HEAD-only fast path; skips download + everything if matched |
-| `build` | `source.content_hash` | [`lib/zip-hash.js`](lib/zip-hash.js): SHA-256 of sorted entry-name + content | Computed after build script runs; skips make-sqlite + publish if matched |
+Previous registry is fetched from
+`raw.githubusercontent.com/.../binaries/feeds.json` at the start of
+each run (always fresh, not jsDelivr-cached).
 
-Previous registry is fetched from `raw.githubusercontent.com/.../binaries/feeds.json`
-at the start of each run (always fresh, not jsDelivr-cached).
+## Helpers in `lib/`
 
-## Shared helpers in `lib/`
-
-- `csv.js` — tiny GTFS-CSV parser (shared with `derive-bbox.js` and the
-  feed seed loaders)
+- `csv.js` — tiny GTFS-CSV parser (used by `derive-bbox.js` /
+  `validate.js` / `smoke-remote.js`)
 - `http.js` — shared `User-Agent` constant + `fetchJson` / `fetchText` /
   `fetchToFile`
 - `mdb-rt.js` — resolve realtime URLs via the MobilityData catalog
   (one-hop lookup from Transitous's `spec: gtfs-rt` siblings)
-- `zip-hash.js` — stable content hash of a zip (sorted entry-name +
-  entry-content), used for the build-side skip-on-unchanged

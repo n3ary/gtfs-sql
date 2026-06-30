@@ -48,6 +48,7 @@ const SCHEMA = {
       ['agency_id', 'TEXT'],
       ['route_short_name', 'TEXT'],
       ['route_long_name', 'TEXT'],
+      ['route_desc', 'TEXT'],
       ['route_type', 'INTEGER'],
       ['route_color', 'TEXT'],
       ['route_text_color', 'TEXT'],

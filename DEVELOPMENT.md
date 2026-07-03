@@ -130,3 +130,9 @@ Secrets and variables driving the R2 upload live in repo settings:
 Uploads set `Cache-Control: public, max-age=300` on both `feeds.json`
 and each `<id>.sqlite3.gz` — matches the previous GitHub-raw behavior
 so propagation stays bounded to ≤ 5 min per publish.
+
+## Infrastructure index
+
+For the full picture of what this pipeline touches (cloud, external APIs,
+upstream sources, the consumer-side mirroring, the planned Hetzner RT
+adapter) see [docs/architecture/infrastructure.md](docs/architecture/infrastructure.md).

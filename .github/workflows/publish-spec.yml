@@ -33,6 +33,7 @@ on:
 permissions:
   contents: write   # for the version-bump + tag-push path
   packages: write   # for npm publish
+  id-token: write   # for npm publish --provenance (OIDC token from Actions)
 
 jobs:
   publish:

@@ -29,6 +29,10 @@
     "test": "vitest --run --passWithNoTests",
     "lint": "echo 'no lint yet' && exit 0"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",
     "access": "public"

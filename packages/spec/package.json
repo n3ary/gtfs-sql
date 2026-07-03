@@ -18,6 +18,10 @@
     "./schema": {
       "types": "./dist/schema/index.d.ts",
       "import": "./dist/schema/index.js"
+    },
+    "./sql": {
+      "types": "./dist/sql/index.d.ts",
+      "import": "./dist/sql/index.js"
     }
   },
   "scripts": {
@@ -30,6 +34,7 @@
     "zod": "^4.4.0"
   },
   "devDependencies": {
+    "better-sqlite3": "^12.11.1",
     "typescript": "^6.0.0",
     "vitest": "^4.1.0"
   }

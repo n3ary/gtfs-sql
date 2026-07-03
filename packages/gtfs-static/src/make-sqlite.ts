@@ -27,171 +27,16 @@ import { createHash } from 'node:crypto';
 import { resolveRouteColors, computeNetworkColors } from './lib/route-colors.js';
 import type { SqliteFile } from './lib/types.js';
 import { OUTPUTS } from './fetch-gtfs.js';
+import { SCHEMA, REQUIRED_TABLES, type ColumnSpec } from '@neary-gtfs/spec/sql';
+import { EXTENSIONS } from './extensions.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
-// ----- GTFS table schema (must match what the app's worker expects) ----
-
-type ColumnSpec = [name: string, type: string];
-type SchemaSpec = {
-  file: string;
-  columns: ColumnSpec[];
-  tableConstraints?: string[];
-  withoutRowid?: boolean;
-  indexes?: Array<[name: string, cols: string]>;
-};
-
-const SCHEMA: Record<string, SchemaSpec> = {
-  agency: {
-    file: 'agency.txt',
-    columns: [
-      ['agency_id', 'TEXT PRIMARY KEY'],
-      ['agency_name', 'TEXT'],
-      ['agency_url', 'TEXT'],
-      ['agency_timezone', 'TEXT'],
-      ['agency_lang', 'TEXT'],
-      ['agency_phone', 'TEXT'],
-    ],
-  },
-  routes: {
-    file: 'routes.txt',
-    columns: [
-      ['route_id', 'TEXT PRIMARY KEY'],
-      ['agency_id', 'TEXT'],
-      ['route_short_name', 'TEXT'],
-      ['route_long_name', 'TEXT'],
-      ['route_desc', 'TEXT'],
-      ['route_type', 'INTEGER'],
-      ['route_color', 'TEXT'],
-      ['route_text_color', 'TEXT'],
-    ],
-    indexes: [['routes_agency_idx', '(agency_id)']],
-  },
-  stops: {
-    file: 'stops.txt',
-    columns: [
-      ['stop_id', 'TEXT PRIMARY KEY'],
-      ['stop_code', 'TEXT'],
-      ['stop_name', 'TEXT'],
-      ['stop_lat', 'REAL'],
-      ['stop_lon', 'REAL'],
-      ['location_type', 'INTEGER'],
-      ['parent_station', 'TEXT'],
-      ['wheelchair_boarding', 'INTEGER'],
-    ],
-  },
-  trips: {
-    file: 'trips.txt',
-    columns: [
-      ['trip_id', 'TEXT PRIMARY KEY'],
-      ['route_id', 'TEXT'],
-      ['service_id', 'TEXT'],
-      ['trip_headsign', 'TEXT'],
-      ['direction_id', 'INTEGER'],
-      ['shape_id', 'TEXT'],
-      ['wheelchair_accessible', 'INTEGER'],
-      ['bikes_allowed', 'INTEGER'],
-    ],
-    indexes: [
-      ['trips_route_idx', '(route_id)'],
-      ['trips_service_idx', '(service_id)'],
-      ['trips_shape_idx', '(shape_id)'],
-    ],
-  },
-  // stop_times is 60-90% of a national GTFS sqlite by size. Two knobs:
-  //   * Composite PK (trip_id, stop_sequence) is already the natural key,
-  //     so we can make the primary-key B-tree BE the table via
-  //     WITHOUT ROWID. That drops the implicit rowid column and folds
-  //     the previous `(trip_id, stop_sequence)` index into the primary
-  //     store — one less full-table B-tree on disk.
-  //   * INSERT OR IGNORE keeps the old dedupe behaviour: duplicate
-  //     (trip_id, stop_sequence) rows from misbehaving feeds get
-  //     dropped instead of aborting the batch transaction.
-  stop_times: {
-    file: 'stop_times.txt',
-    columns: [
-      ['trip_id', 'TEXT NOT NULL'],
-      ['arrival_time', 'TEXT'],
-      ['departure_time', 'TEXT'],
-      ['stop_id', 'TEXT'],
-      ['stop_sequence', 'INTEGER NOT NULL'],
-      ['pickup_type', 'INTEGER'],
-      ['drop_off_type', 'INTEGER'],
-      ['shape_dist_traveled', 'REAL'],
-    ],
-    tableConstraints: ['PRIMARY KEY (trip_id, stop_sequence)'],
-    withoutRowid: true,
-    indexes: [
-      ['stop_times_stop_idx', '(stop_id)'],
-    ],
-  },
-  calendar: {
-    file: 'calendar.txt',
-    columns: [
-      ['service_id', 'TEXT PRIMARY KEY'],
-      ['monday', 'INTEGER'],
-      ['tuesday', 'INTEGER'],
-      ['wednesday', 'INTEGER'],
-      ['thursday', 'INTEGER'],
-      ['friday', 'INTEGER'],
-      ['saturday', 'INTEGER'],
-      ['sunday', 'INTEGER'],
-      ['start_date', 'TEXT'],
-      ['end_date', 'TEXT'],
-    ],
-  },
-  calendar_dates: {
-    file: 'calendar_dates.txt',
-    columns: [
-      ['service_id', 'TEXT'],
-      ['date', 'TEXT'],
-      ['exception_type', 'INTEGER'],
-    ],
-    indexes: [['calendar_dates_service_date_idx', '(service_id, date)']],
-  },
-  shapes: {
-    file: 'shapes.txt',
-    columns: [
-      ['shape_id', 'TEXT'],
-      ['shape_pt_lat', 'REAL'],
-      ['shape_pt_lon', 'REAL'],
-      ['shape_pt_sequence', 'INTEGER'],
-      ['shape_dist_traveled', 'REAL'],
-    ],
-    indexes: [['shapes_id_seq_idx', '(shape_id, shape_pt_sequence)']],
-  },
-  feed_info: {
-    file: 'feed_info.txt',
-    columns: [
-      ['feed_publisher_name', 'TEXT'],
-      ['feed_publisher_url', 'TEXT'],
-      ['feed_lang', 'TEXT'],
-      ['feed_start_date', 'TEXT'],
-      ['feed_end_date', 'TEXT'],
-      ['feed_version', 'TEXT'],
-    ],
-  },
-  networks: {
-    file: 'networks.txt',
-    columns: [
-      ['network_id', 'TEXT PRIMARY KEY'],
-      ['network_name', 'TEXT'],
-      ['network_color', 'TEXT'],
-    ],
-  },
-  route_networks: {
-    file: 'route_networks.txt',
-    columns: [
-      ['network_id', 'TEXT'],
-      ['route_id', 'TEXT'],
-    ],
-    indexes: [
-      ['route_networks_network_idx', '(network_id)'],
-      ['route_networks_route_idx', '(route_id)'],
-    ],
-  },
-};
+// The spec DDL is the canonical contract for the 9 standard tables.
+// Per-feed extensions (networks, route_networks) live in ./extensions.ts
+// and are applied after the spec schema. See ./extensions.ts for why
+// the extension tables aren't in the spec package.
 
 // GTFS `stop_times.txt` and `shapes.txt` routinely exceed 500 MB
 // uncompressed on national feeds. Node's max string length is
@@ -219,7 +64,7 @@ const CSV_PARSE_OPTS = {
 // GTFS spec-required files whose absence (or empty output after a
 // stream error) means the sqlite is unusable. We refuse to publish
 // an empty schedule rather than let a client fail an integrity check.
-const REQUIRED_TABLES = ['agency', 'stops', 'routes', 'trips', 'stop_times'];
+// (REQUIRED_TABLES is imported from @neary-gtfs/spec/sql — see top of file.)
 
 async function* streamCsvRows(zip: StreamZip.StreamZipAsync, filename: string): AsyncGenerator<Record<string, string>> {
   const stream = await zip.stream(filename);
@@ -237,6 +82,9 @@ async function collectCsvRows(zip: StreamZip.StreamZipAsync, filename: string): 
 }
 
 function createSchema(db: Database.Database): void {
+  // 1. Spec DDL — the 9 standard GTFS Schedule tables, applied as the
+  //    shared @neary-gtfs/spec/sql SCHEMA object so static and (later)
+  //    the gtfs-rt package agree on the same shape.
   for (const [tableName, spec] of Object.entries(SCHEMA)) {
     const cols = spec.columns.map(([n, t]) => `${n} ${t}`);
     const constraints = spec.tableConstraints ?? [];
@@ -247,6 +95,15 @@ function createSchema(db: Database.Database): void {
       db.exec(`CREATE INDEX ${idxName} ON ${tableName} ${idxCols};`);
     }
   }
+  // 2. Per-feed extension tables — not in the GTFS spec; producer-only.
+  for (const [tableName, spec] of Object.entries(EXTENSIONS)) {
+    const cols = spec.columns.map(([n, t]) => `${n} ${t}`).join(', ');
+    db.exec(`CREATE TABLE ${tableName} (${cols});`);
+    for (const [idxName, idxCols] of spec.indexes ?? []) {
+      db.exec(`CREATE INDEX ${idxName} ON ${tableName} ${idxCols};`);
+    }
+  }
+  // 3. The producer's own _neary_config table — not part of GTFS.
   db.exec(`CREATE TABLE _neary_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
 }
 

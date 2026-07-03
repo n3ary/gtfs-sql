@@ -6,8 +6,7 @@
   "description": "App-side GTFS → SQLite + feeds.json registry for the neary PWA",
   "scripts": {
     "pipeline": "node src/pipeline/build-all.js",
-    "test": "vitest --run --passWithNoTests",
-    "lint": "eslint src/ feeds/"
+    "test": "vitest --run --passWithNoTests"
   },
   "engines": {
     "node": ">=24"

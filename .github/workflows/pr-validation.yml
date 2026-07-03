@@ -43,12 +43,16 @@ jobs:
           fi
 
           # Get the current version on main
-          MAIN_VERSION=$(git show origin/main:package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).version")
-          # Increment the patch
-          NEXT_VERSION=$(node -p "
-            const [major, minor, patch] = '${MAIN_VERSION}'.split('.').map(Number);
-            major + '.' + minor + '.' + (patch + 1)
-          ")
+          MAIN_VERSION=$(git show origin:main:package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).version")
+          # Increment the patch. Handles pre-release tags (e.g. 0.2.0-m1 → 0.2.1-m1)
+          # by preserving the suffix across the bump. Fails loudly on
+          # unparseable versions.
+          NEXT_VERSION=$(node -e '
+            const v = process.argv[1].match(/^(\d+)\.(\d+)\.(\d+)(-.+)?$/);
+            if (!v) { console.error("Unparseable version:", process.argv[1]); process.exit(1); }
+            const [, major, minor, patchStr, prerelease = ""] = v;
+            console.log(`${major}.${minor}.${Number(patchStr) + 1}${prerelease}`);
+          ' "$MAIN_VERSION")
           # Get this branch's current version
           CURRENT_VERSION=$(node -p "require('./package.json').version")
 

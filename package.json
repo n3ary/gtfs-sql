@@ -14,6 +14,7 @@
     "test": "pnpm -r --parallel test",
     "test:static": "pnpm --filter @gtfs/static test",
     "build": "pnpm -r --filter './packages/*' build",
+    "check": "pnpm -r --filter './packages/*' check",
     "lint": "pnpm -r --parallel lint"
   },
   "devDependencies": {

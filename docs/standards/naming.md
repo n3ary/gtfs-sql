@@ -27,7 +27,7 @@
 
 ## Domain identifiers
 
-See [../concepts/terminology.md](../concepts/terminology.md).
+See [concepts/terminology.md](../concepts/terminology.md).
 
 ## Branches
 

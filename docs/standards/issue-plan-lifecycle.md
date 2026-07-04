@@ -81,7 +81,7 @@ The gist: file the issue where the code will be written. If a feature spans mult
 | If the work is in... | The issue lives on... |
 |---|---|
 | This repo (the consumer) | `neary` |
-| The producer / adapter pipeline | `neary-gtfs` |
+| The producer / adapter pipeline | `gtfs` |
 | A separate third-party adapter | That adapter's repo |
 
 Cross-repo coordination goes in the issue description: list the affected repos, link to sister issues on each.

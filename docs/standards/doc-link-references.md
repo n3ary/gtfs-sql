@@ -1,36 +1,39 @@
-<!-- synced from n3ary/standards@ef77e9b on 2026-07-04 -->
+<!-- synced from n3ary/standards@2a7b208 on 2026-07-04 -->
 <!-- do not edit locally; run scripts/vendor-standards.mjs to update -->
 
 # Doc link references
 
-Links in our docs and READMEs are either:
+Two kinds of links in our docs and READMEs:
 
 | Kind | Format | Example |
 |---|---|---|
-| External | full URL, text is usually the URL or a description | `[pull request](https://github.com/n3ary/gtfs/pull/59)` |
-| Same-repo, sibling | filename only, no path | `[agent-worktrees.md](agent-worktrees.md)` |
-| Same-repo, cross-dir | relative path, **text is just the filename** | `[multi-feed-data-lifecycle.md](../specs/multi-feed-data-lifecycle.md)` |
-| Cross-repo | URL, text is the `<repo>#<id>` or `<repo>:<path>` | `[gtfs#34](https://github.com/n3ary/gtfs/issues/34)` |
+| External | full URL | `[pull request](https://github.com/...)` |
+| Same-repo | filename only, no path | `[agent-worktrees.md](agent-worktrees.md)` |
+| Cross-repo | repo + path, no leading slash | `[n3ary/gtfs#34](https://github.com/n3ary/gtfs/issues/34)` |
 
-## The rule: filename only as link text
+## The rule: filename only for same-repo links
 
-When linking to another file in the same repo, **the link text is always just the filename** (without any `../...` prefix). The link target still uses the relative path because that's what the link's own file needs to reach the target.
+When a doc lives in the same repo as the thing it links to, the link target is **just the filename**, not the path. Examples:
 
-- ✅ `[multi-feed-data-lifecycle.md](../specs/multi-feed-data-lifecycle.md)`
-- ❌ `[specs/multi-feed-data-lifecycle.md](../specs/multi-feed-data-lifecycle.md)`
+- ✅ `[agent-worktrees.md](agent-worktrees.md)`
+- ❌ `[agent-worktrees.md](../standards/agent-worktrees.md)`
+- ✅ `[feeds-json.md](../specs/feeds-json.md)` — wait, this is **wrong**, the spec lives in a sibling directory, the path traversal is needed.
 
-- ✅ `[agent-worktrees.md](agent-worktrees.md)` (sibling, no path needed)
-- ❌ `[standards/agent-worktrees.md](agent-worktrees.md)` (path duplicates the target)
+Correction. The rule is: **the link text equals the link target as it would be opened in the file tree from the link's own location**. So if the doc is in `docs/standards/`, a link to a sibling in `docs/standards/` is `[foo.md](foo.md)`. A link to a doc in `docs/specs/` is `[foo.md](../specs/foo.md)`.
+
+But: **the display text should be the filename, not the path.** Renderers like GitHub's auto-link will show the full path. The display text is for human readers; minimize it.
+
+So:
+- ✅ `[foo.md](foo.md)` — text is just the filename
+- ❌ `[../standards/foo.md](../standards/foo.md)` — text duplicates the path
+- ✅ `../specs/foo.md` — the link target is a relative path; that's fine
 
 ## Why
 
 - Reader eyes see only the filename, not the directory tree. Less visual noise.
-- The `../` traversal in the text duplicates the path structure that's already implicit in the link target. Doubled.
-- The standard is enforced by review, not by linter. Manual checklist item: *"No `../...` at the start of any link text in `*.md` files."*
+- Files move between directories over time. Filename-only links break on move; full-path links break on move too. Same outcome, but filename-only is more readable.
+- The `../` traversal in a link text duplicates the path structure that's already implicit in the link target.
 
-## Link targets are paths, link text is a name
+## Enforce in PR review
 
-These are different concerns:
-
-- **Target**: the path or URL that opens when you click. For a file in the same repo, this is a relative path. For a section, an anchor (`#some-section`). For a URL, the full URL.
-- **Text**: what the reader sees. Should be the destination's name (filename, section title, repo#id) — never the path.
+Linters don't catch this. Add a manual review checklist item: *"No `../...` at the start of any link text in docs/ or .md files."*

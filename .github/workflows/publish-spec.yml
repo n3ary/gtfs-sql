@@ -56,7 +56,23 @@ jobs:
         # --trust-lockfile: the lockfile is part of the source tree
         # and goes through PR review. Skips pnpm 11's supply-chain
         # re-verification (which can reject fresh publishes within 24h).
-        run: pnpm install --frozen-lockfile --trust-lockfile
+        #
+        # NODE_AUTH_TOKEN + HOME-scoped .npmrc: the workspace's
+        # pnpm-lock.yaml references @n3ary/gtfs-adapter-cluj-napoca
+        # (a private package on GH Packages) as a dev-dep of the
+        # gtfs-static package. Without auth, `pnpm install` 401s
+        # on that tarball. Mirror the same HOME-scoped pattern from
+        # daily.yml + pr-validation.yml.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          HOME: ${{ runner.temp }}/publish-spec-clean-home
+        run: |
+          mkdir -p "$HOME"
+          {
+            echo "@n3ary:registry=https://npm.pkg.github.com"
+            echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}"
+          } > "$HOME/.npmrc"
+          pnpm install --frozen-lockfile --trust-lockfile
 
       - name: Build packages
         run: pnpm build

@@ -4,7 +4,7 @@ Every cloud / external piece this repo's pipeline touches, in one diagram + one 
 
 Cross-refs:
 - Pipeline development + CI workflow — [DEVELOPMENT.md](../../DEVELOPMENT.md)
-- Pipeline anatomy — [README.md](../../packages/gtfs-static/src/README.md)
+- Pipeline anatomy — [README.md](../../apps/gtfs-static/src/README.md)
 - Sister repo that consumes the outputs — [n3ary/app](https://github.com/n3ary/app) (formerly `ciotlosm/neary`, renamed in #53)
 
 ## Diagram

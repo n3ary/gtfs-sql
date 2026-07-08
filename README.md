@@ -63,7 +63,7 @@ consumer needs:
 5. Add the Transitous source name (if any) to `countries.json`'s `include[]`
    so the catalog lookup finds it.
 
-No code change in `packages/gtfs-static/src/cli.ts` — the orchestrator is
+No code change in `apps/gtfs-static/src/cli.ts` — the orchestrator is
 feed-agnostic and discovers adapters by `source.publisher` at runtime.
 
 ## Quick start

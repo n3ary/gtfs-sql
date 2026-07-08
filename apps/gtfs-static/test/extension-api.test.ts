@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { ZipArchive } from 'archiver';
 import { createWriteStream, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
@@ -89,7 +89,7 @@ describe('makeSqlite StaticExtension API', () => {
     const raw = gunzipSync(gz);
     const dbPath = join(WORK, 'demo-extension.sqlite3');
     writeFileSync(dbPath, raw);
-    const db = new Database(dbPath, { readonly: true });
+    const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       // Caller's ALTER TABLE on routes landed.
       const routeExtra = db.prepare("SELECT route_extra FROM routes WHERE route_id = 'R1'").get() as { route_extra: string | null } | undefined;
@@ -149,7 +149,7 @@ describe('makeSqlite StaticExtension API', () => {
     const raw = gunzipSync(gz);
     const dbPath = join(WORK, 'no-ext.sqlite3');
     writeFileSync(dbPath, raw);
-    const db = new Database(dbPath, { readonly: true });
+    const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       // No network_color column on networks when no extension is given.
       const cols = db.prepare("PRAGMA table_info('networks')").all() as Array<{ name: string }>;

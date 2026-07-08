@@ -12,7 +12,7 @@
  * adapter per feed (or per upstream source family).
  */
 
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import type { ColumnSpec } from '@n3ary/gtfs-spec/sql';
 
 /**
@@ -47,7 +47,7 @@ export type ExtensionContext = {
 };
 
 export type FillComputedColumnsHook = (
-  db: Database.Database,
+  db: DatabaseSync,
   context: ExtensionContext,
 ) => void | Promise<void>;
 

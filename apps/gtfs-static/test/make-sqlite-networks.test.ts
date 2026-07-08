@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { ZipArchive } from 'archiver';
 import { createWriteStream, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
@@ -65,13 +65,13 @@ describe('make-sqlite + networks ingestion (n3ary/app#190)', () => {
     const result = await makeSqlite(ZIP_PATH, 'test-networks');
     expect(result).not.toBeNull();
 
-    // Decompress the .gz so we can open it with better-sqlite3.
+    // Decompress the .gz so we can open it with node:sqlite.
     const gz = readFileSync(result!.localPath);
     const raw = gunzipSync(gz);
     const dbPath = join(WORK, 'test-networks.sqlite3');
     writeFileSync(dbPath, raw);
 
-    const db = new Database(dbPath, { readonly: true });
+    const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       // Both public spec tables must have rows.
       const networksCount = (db.prepare('SELECT COUNT(*) AS c FROM networks').get() as { c: number }).c;

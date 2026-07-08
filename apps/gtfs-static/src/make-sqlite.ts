@@ -20,7 +20,7 @@
  * `n3ary/gtfs-adapters/adapters/<feed>/src/static/`).
  */
 
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { parse } from 'csv-parse';
 import StreamZip from 'node-stream-zip';
 
@@ -43,6 +43,13 @@ const ROOT = join(__dirname, '..');
 // Schedule tables (agency, stops, routes, trips, stop_times, calendar,
 // calendar_dates, shapes, feed_info, networks, route_networks).
 // Anything beyond the spec arrives via the `extensions` argument.
+
+// Local alias to keep the rest of the file driver-agnostic. The pipeline
+// previously used better-sqlite3; it now uses Node's built-in
+// `node:sqlite` (DatabaseSync) — same upstream SQLite engine, same file
+// format, zero native build dependency. Driver swaps stay in this file;
+// the rest of the codebase talks to `DatabaseSync`-shaped objects.
+type DB = DatabaseSync;
 
 // GTFS `stop_times.txt` and `shapes.txt` routinely exceed 500 MB
 // uncompressed on national feeds. Node's max string length is
@@ -87,14 +94,15 @@ async function collectCsvRows(zip: StreamZip.StreamZipAsync, filename: string): 
   return rows;
 }
 
-function createSchema(db: Database.Database, extensions?: StaticExtension): void {
+function createSchema(db: DB, extensions?: StaticExtension): void {
   // 0. Enable FK enforcement. Without this pragma, SQLite parses but
   //    does NOT enforce FOREIGN KEY declarations — the spec DDL
   //    declares the constraints but they're silently ignored at
   //    INSERT time. CHECK constraints are always enforced regardless.
   //    See https://www.sqlite.org/foreignkeys.html (pragma #1).
   //
-  //    Per-connection — must be re-issued for every Database() instance.
+  //    Per-connection — must be re-issued for every DatabaseSync
+  //    instance.
   db.exec('PRAGMA foreign_keys = ON;');
 
   // 1. Spec DDL — all 11 public GTFS Schedule tables, applied as the
@@ -145,7 +153,7 @@ function createSchema(db: Database.Database, extensions?: StaticExtension): void
  * order side-effects relative to row insertion.
  */
 function insertTableExtensionRows(
-  db: Database.Database,
+  db: DB,
   extensions: StaticExtension | undefined,
   tag: string,
 ): void {
@@ -155,17 +163,22 @@ function insertTableExtensionRows(
     const cols = ext.columns.map(([n]) => n);
     const placeholders = cols.map(() => '?').join(', ');
     const stmt = db.prepare(`INSERT OR IGNORE INTO ${tableName} (${cols.join(', ')}) VALUES (${placeholders})`);
-    const insertBatch = db.transaction((rows: ReadonlyArray<Record<string, unknown>>) => {
-      for (const row of rows) {
-        stmt.run(cols.map((c) => row[c] ?? null));
+    runInTransaction(db, () => {
+      for (const row of ext.rows!) {
+        // `node:sqlite` typed `stmt.run(...args: SQLInputValue[])` where
+        // SQLInputValue = null | number | bigint | string | ArrayBufferView.
+        // TS can't always infer the spread for union-typed arrays; cast here
+        // centralizes the bridge between CSV-derived values and the SQLite
+        // parameter type.
+        const values = cols.map((c) => row[c] ?? null);
+        stmt.run(...(values as Array<string | number | bigint | null | Uint8Array>));
       }
     });
-    insertBatch(ext.rows);
     console.log(`${tag}: ${tableName} — ${ext.rows.length} extension row(s) inserted`);
   }
 }
 
-function makeRowInserter(db: Database.Database, tableName: string, columns: ColumnSpec[]) {
+function makeRowInserter(db: DB, tableName: string, columns: ColumnSpec[]) {
   const colNames = columns.map(([n]) => n);
   const placeholders = colNames.map(() => '?').join(', ');
   // Plain INSERT (not INSERT OR IGNORE) — let CHECK + FK constraint
@@ -179,22 +192,40 @@ function makeRowInserter(db: Database.Database, tableName: string, columns: Colu
   // had duplicate stop_id rows for parent stations; we now expect
   // upstream feeds to be clean and reject malformed input loudly.)
   const stmt = db.prepare(`INSERT INTO ${tableName} (${colNames.join(', ')}) VALUES (${placeholders})`);
-  const insertBatch = db.transaction((batch: Array<Record<string, string>>) => {
-    for (const row of batch) {
-      const values = colNames.map((c) => {
-        const v = row[c];
-        return v === undefined || v === '' ? null : v;
-      });
-      stmt.run(values);
-    }
-  });
-  return insertBatch;
+  return (batch: Array<Record<string, string>>): void => {
+    runInTransaction(db, () => {
+      for (const row of batch) {
+        const values = colNames.map((c) => {
+          const v = row[c];
+          return v === undefined || v === '' ? null : v;
+        });
+        // Cast: see comment above on TS variance with the rest parameter.
+        stmt.run(...(values as Array<string | number | bigint | null | Uint8Array>));
+      }
+    });
+  };
 }
 
-function insertRows(db: Database.Database, tableName: string, columns: ColumnSpec[], rows: Array<Record<string, string>>): number {
+function insertRows(db: DB, tableName: string, columns: ColumnSpec[], rows: Array<Record<string, string>>): number {
   if (!rows || rows.length === 0) return 0;
   makeRowInserter(db, tableName, columns)(rows);
   return rows.length;
+}
+
+// `node:sqlite` (DatabaseSync) does not expose `db.transaction(fn)` like
+// better-sqlite3 did — wrap a sync body in a manual BEGIN/COMMIT and
+// ROLLBACK on throw. The wrapped work is on the order of a few thousand
+// inserts per call, so the BEGIN/COMMIT overhead is negligible relative
+// to the bulk-load pragma setup (see PRAGMA block below).
+function runInTransaction(db: DB, body: () => void): void {
+  db.exec('BEGIN');
+  try {
+    body();
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* swallow rollback failure — original error is the actionable one */ }
+    throw e;
+  }
 }
 
 const INSERT_BATCH_SIZE = 5000;
@@ -203,7 +234,7 @@ const INSERT_BATCH_SIZE = 5000;
 const PROGRESS_EVERY = 250_000;
 
 async function streamRowsIntoTable(
-  db: Database.Database,
+  db: DB,
   tableName: string,
   columns: ColumnSpec[],
   source: AsyncGenerator<Record<string, string>>,
@@ -248,20 +279,28 @@ export async function makeSqlite(
   if (existsSync(dbPath)) unlinkSync(dbPath);
 
   const zip = new StreamZip.async({ file: gtfsZipPath });
-  const db = new Database(dbPath);
+  const db = new DatabaseSync(dbPath);
   // page_size MUST be set before any DDL — SQLite ignores changes
   // once the file has content. 8192 is chosen over the 4096 default
   // because row-heavy tables (stop_times, shapes) pack denser at 8K.
-  db.pragma('page_size = 8192');
+  db.exec('PRAGMA page_size = 8192;');
   // Bulk-load pragmas. Durability doesn't matter here — the sqlite
   // is rebuilt from the raw GTFS zip if the process dies mid-write.
-  // Disabling the journal + fsync avoids two things at national-feed
+  // Disabling fsync and using WAL avoids two things at national-feed
   // scale: (a) the readonly-database errors we saw when the rollback
   // journal creation/deletion cadence tripped over macOS APFS, and
   // (b) the 5–10x throughput cost of syncing on every batch commit.
-  db.pragma('journal_mode = OFF');
-  db.pragma('synchronous = OFF');
-  db.pragma('temp_store = MEMORY');
+  //
+  // Note: `node:sqlite` refuses `journal_mode = OFF` as a deliberate
+  // safety restriction — verified against Node 22 / 24 / 26. WAL mode
+  // is allowed and is in the same speed band for many small commits
+  // (each batch goes into the WAL file; checkpoint happens at close).
+  // The "OFF" path was strictly faster but WAL is close enough that
+  // the gain wasn't worth the data-corruption risk the built-in is
+  // guarding against.
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA synchronous = OFF;');
+  db.exec('PRAGMA temp_store = MEMORY;');
 
   try {
     createSchema(db, extensions);

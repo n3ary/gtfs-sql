@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { SCHEMA, SCHEMA_SQL, REQUIRED_TABLES } from '../src/sql/ddl.js';
 
 describe('SCHEMA', () => {
@@ -71,7 +71,7 @@ describe('SCHEMA', () => {
 
 describe('SCHEMA_SQL', () => {
   it('parses as valid SQL on a fresh sqlite', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       expect(() => db.exec(SCHEMA_SQL)).not.toThrow();
     } finally {
@@ -80,7 +80,7 @@ describe('SCHEMA_SQL', () => {
   });
 
   it('creates all 9 standard tables', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       const tables = db.prepare(
@@ -99,7 +99,7 @@ describe('SCHEMA_SQL', () => {
   });
 
   it('creates the non-PK indexes declared in SCHEMA', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       const indexes = db.prepare(
@@ -117,7 +117,7 @@ describe('SCHEMA_SQL', () => {
   });
 
   it('stop_times is created as a WITHOUT ROWID table', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       // sqlite_master 'sql' for a without-rowid table contains 'WITHOUT ROWID'.
@@ -135,7 +135,7 @@ describe('SCHEMA_SQL', () => {
     // Cross-check that the SQL string's columns correspond to the
     // structural definition. If someone hand-edits one without the
     // other, this fails.
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       for (const [tableName, spec] of Object.entries(SCHEMA)) {
@@ -160,7 +160,7 @@ describe('REQUIRED_TABLES', () => {
 
 describe('CHECK constraints (Layer 2: per-row invariants)', () => {
   it('rejects stop_lat out of [-90, 90]', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       db.exec("PRAGMA foreign_keys = ON;");
@@ -174,7 +174,7 @@ describe('CHECK constraints (Layer 2: per-row invariants)', () => {
   });
 
   it('rejects stop_lon out of [-180, 180]', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       expect(() =>
@@ -186,7 +186,7 @@ describe('CHECK constraints (Layer 2: per-row invariants)', () => {
   });
 
   it('rejects location_type out of [0, 4]', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       expect(() =>
@@ -198,7 +198,7 @@ describe('CHECK constraints (Layer 2: per-row invariants)', () => {
   });
 
   it('rejects route_color not 6 chars', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       db.prepare("INSERT INTO agency (agency_name, agency_url, agency_timezone) VALUES ('A','https://a','UTC')").run();
@@ -214,7 +214,7 @@ describe('CHECK constraints (Layer 2: per-row invariants)', () => {
   });
 
   it('rejects arrival_time not in HH:MM:SS format', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       db.prepare("INSERT INTO agency (agency_name, agency_url, agency_timezone) VALUES ('A','https://a','UTC')").run();
@@ -231,7 +231,7 @@ describe('CHECK constraints (Layer 2: per-row invariants)', () => {
   });
 
   it('rejects calendar.day bits not in {0, 1}', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       expect(() =>
@@ -243,7 +243,7 @@ describe('CHECK constraints (Layer 2: per-row invariants)', () => {
   });
 
   it('rejects calendar.start_date > end_date', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       expect(() =>
@@ -257,7 +257,7 @@ describe('CHECK constraints (Layer 2: per-row invariants)', () => {
 
 describe('FOREIGN KEY constraints (Layer 2: referential integrity)', () => {
   it('rejects trips.route_id that does not exist in routes', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       db.exec('PRAGMA foreign_keys = ON;');
@@ -276,7 +276,7 @@ describe('FOREIGN KEY constraints (Layer 2: referential integrity)', () => {
   });
 
   it('rejects stop_times.trip_id that does not exist in trips', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       db.exec('PRAGMA foreign_keys = ON;');
@@ -291,7 +291,7 @@ describe('FOREIGN KEY constraints (Layer 2: referential integrity)', () => {
   });
 
   it('rejects stop_times.stop_id that does not exist in stops', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       db.exec('PRAGMA foreign_keys = ON;');
@@ -309,7 +309,7 @@ describe('FOREIGN KEY constraints (Layer 2: referential integrity)', () => {
   });
 
   it('rejects calendar_dates.service_id that does not exist in calendar', () => {
-    const db = new Database(':memory:');
+    const db = new DatabaseSync(':memory:');
     try {
       db.exec(SCHEMA_SQL);
       db.exec('PRAGMA foreign_keys = ON;');

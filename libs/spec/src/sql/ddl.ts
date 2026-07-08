@@ -4,11 +4,11 @@
  * One CREATE TABLE per spec file in the GTFS Schedule reference
  * (https://gtfs.org/documentation/schedule/reference/), plus the
  * indexes our consumers rely on. Browser-compatible — this file does
- * NOT import `better-sqlite3` (or any other native driver). Consumers
+ * NOT import `node:sqlite` (or any other native driver). Consumers
  * apply the DDL with their preferred driver:
  *
- *   import Database from 'better-sqlite3';            // Node
- *   const db = new Database(':memory:');
+ *   import { DatabaseSync } from 'node:sqlite';         // Node 22.5+ / 24+
+ *   const db = new DatabaseSync(':memory:');
  *   db.exec(SCHEMA_SQL);
  *
  *   import sqlite3InitModule from '@sqlite.org/sqlite-wasm';  // browser
@@ -52,7 +52,7 @@
  *     `validate.ts`-level cross-reference check (Layer 1) to catch
  *     orphans.
  *   - `stops.parent_station` is a self-reference; SQLite allows
- *     deferred FK check on this, but better-sqlite3 with the default
+ *     deferred FK check on this, but `node:sqlite` with the default
  *     `foreign_keys = ON` checks at INSERT time. We use NO ACTION
  *     (the default) which surfaces the violation immediately.
  */

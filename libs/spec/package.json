@@ -65,7 +65,6 @@
     "zod": "^4.4.0"
   },
   "devDependencies": {
-    "better-sqlite3": "^12.11.1",
     "typescript": "^6.0.0",
     "vitest": "^4.1.0"
   },

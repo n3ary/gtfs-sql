@@ -281,6 +281,12 @@ class Reader {
       case 0: this.readVarint(); return;
       case 1: this.pos += 8; return;
       case 2: this.pos += Number(this.readVarint()); return;
+      // Wire types 3 (START_GROUP) and 4 (END_GROUP) are deprecated
+      // in proto3 but some upstream encoders still emit them for
+      // compatibility. They carry no payload bytes - the group
+      // markers are implicit in the surrounding tags.
+      case 3: return;
+      case 4: return;
       case 5: this.pos += 4; return;
       default: throw new Error("unknown wire type " + wire);
     }
@@ -365,19 +371,33 @@ function decodeMessage(reader, name) {
   const schema = FIELD[name];
   if (!schema) throw new Error("no schema for " + name);
   const out = {};
+  // Tolerate malformed tail bytes from upstream encoders. Some
+  // GTFS-RT producers emit non-canonical varints or truncated
+  // trailing fields; we'd rather render the entities we DID
+  // decode than throw the whole response away. The error is
+  // surfaced in the meta panel so the operator sees it.
+  let truncated = false;
   while (reader.remaining() > 0) {
-    const tag = reader.readTag();
-    const field = schema[tag.field];
-    if (!field) {
-      reader.skip(tag.wire);
-      continue;
+    let tag;
+    try {
+      tag = reader.readTag();
+    } catch (e) {
+      truncated = true; break;
     }
-    if (field.repeated) {
-      (out[field.name] ||= []).push(decodeField(reader, field, name));
-    } else {
-      out[field.name] = decodeField(reader, field, name);
+    const field = schema[tag.field];
+    try {
+      if (!field) {
+        reader.skip(tag.wire);
+      } else if (field.repeated) {
+        (out[field.name] ||= []).push(decodeField(reader, field, name));
+      } else {
+        out[field.name] = decodeField(reader, field, name);
+      }
+    } catch (e) {
+      truncated = true; break;
     }
   }
+  out._decodeTruncated = truncated;
   return out;
 }
 
@@ -452,6 +472,10 @@ async function fetchDecode(url) {
       timestamp: header.timestamp ?? null,
       entityCount: entities.length,
       vehicleCount: vehicles.length,
+      // decodeMessage sets this when it hit a non-canonical tail
+      // byte and stopped early. We render everything we DID get
+      // rather than throwing the whole response away.
+      decodeTruncated: !!msg._decodeTruncated,
     },
     vehicles,
   };
@@ -609,6 +633,7 @@ function renderMeta(el, m, err) {
     <div><span class="k">gtfs-rt:    </span><span class="v">${escapeHtml(m.gtfsRtVersion)} (increm=${m.incrementality})</span></div>
     <div><span class="k">header ts:  </span><span class="v">${m.timestamp ?? ""}</span></div>
     <div><span class="k">entity / vehicle: </span><span class="v">${m.entityCount} / ${m.vehicleCount}</span></div>
+    ${m.decodeTruncated ? '<div><span class="k" style="color:var(--warn)">decode:    </span><span class="v" style="color:var(--warn)">truncated tail (rendered ${m.vehicleCount} of ${m.entityCount})</span></div>' : ''}
   `;
 }
 
@@ -621,8 +646,14 @@ function escapeHtml(s) {
  * ============================================================ */
 
 const DEFAULTS = {
-  left:  "https://gtfs.n3ary.com/rt/cluj-napoca/vehicle_positions",
-  right: "https://gtfs-rt.n3ary.com/rt/cluj-napoca/vehicle_positions",
+  // Left = current production (Hetzner-backed). The compare
+  // tool's purpose is "is my production still serving what the
+  // upstream publishes?", so the production URL is the anchor.
+  left:  "https://gtfs-rt.n3ary.com/rt/cluj-napoca/vehicle_positions",
+  // Right = upstream raw feed. Swapping this for the Pages
+  // Function URL (`gtfs.n3ary.com/rt/...`) or for a staging URL
+  // is the most common second use.
+  right: "https://cluj-rt-feed.gtfs.ro/vehiclePositions",
 };
 
 const $ = (id) => document.getElementById(id);

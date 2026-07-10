@@ -123,9 +123,8 @@ Required repo secrets / variables:
 | `GHCR_TOKEN` | secret | build, deploy | github PAT with `packages:read` (deploy) or `packages:write` (build) on the n3ary org. |
 | `CLOUDFLARE_API_TOKEN` | secret | rebuild-vm | CF API token with Zone DNS edit for n3ary.com. |
 | `HETZNER_SSH_PUBLIC_KEY` | variable | rebuild-vm | Public half of the same SSH key. Used to compute the fingerprint that `hcloud server create --ssh-key` accepts. Not sensitive - the public half is already stored in the Hetzner project. |
-| `HETZNER_HOST` | variable | deploy | Hostname the deploy job SSHes to. Defaults to `gtfs-rt.n3ary.com` if unset. A hostname is preferred over a raw IP because the rebuild workflow updates the DNS A record; the deploy job always lands on the active VM. |
-| `CLOUDFLARE_ZONE_ID` | variable | rebuild-vm | n3ary.com zone id (currently `12fbec52c5a7ee6f7d14ba669a2862cb`). Public value, just inconvenient to hardcode. |
-| `CLOUDFLARE_GTFS_RT_A_RECORD_ID` | variable | rebuild-vm | `gtfs-rt.n3ary.com` A record id (currently `4aa2a22f67a93c1dac9394fa6bbf89af`). Public value. |
+| `CLOUDFLARE_ZONE_ID` | variable | deploy, rebuild-vm | n3ary.com zone id (currently `12fbec52c5a7ee6f7d14ba669a2862cb`). Public value, just inconvenient to hardcode. |
+| `CLOUDFLARE_GTFS_RT_A_RECORD_ID` | variable | deploy, rebuild-vm | `gtfs-rt.n3ary.com` A record id (currently `4aa2a22f67a93c1dac9394fa6bbf89af`). Public value. The deploy job reads `.result.content` (= the origin IP) to know where to SSH (gtfs-rt.n3ary.com is CF-proxied, so DNS returns a CF edge IP that does not forward port 22); the rebuild workflow PATCHes the same record's `.content` as part of a VM swap. |
 
 Hardcoded defaults (no GH config needed):
 

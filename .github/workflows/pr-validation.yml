@@ -27,6 +27,15 @@ jobs:
 
   validate:
     runs-on: ubuntu-latest
+    # Skip Dependabot PRs: GitHub blocks `dependabot[bot]` from
+    # accessing repository secrets (NPM_TOKEN) by default, so
+    # `pnpm install` would 401 on an empty _authToken. Dependabot
+    # PRs only bump version refs in this repo, so the heavy
+    # validation adds no signal here. Shared checks (ASCII-only,
+    # Standards drift) above still run.
+    # Refs:
+    #   - https://docs.github.com/en/code-security/dependabot/working-with-dependabot/configuring-access-to-private-packages-for-dependabot-version-updates
+    if: github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v7

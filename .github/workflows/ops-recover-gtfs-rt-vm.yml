@@ -64,7 +64,7 @@ jobs:
       - name: Check out the repo
         # Required: `gh issue comment` runs `git` internally for branch
         # context and errors out with "not a git repository" without this.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install hcloud
         run: |

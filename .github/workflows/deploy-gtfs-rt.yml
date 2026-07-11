@@ -118,7 +118,7 @@ jobs:
           PY
 
       - name: Deploy (pre-check, backup, pull, restart, healthcheck, rollback)
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ steps.resolve-host.outputs.ip }}
           username: root

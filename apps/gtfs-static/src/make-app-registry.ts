@@ -61,6 +61,7 @@ export function makeAppRegistry(feedEntries: FeedEntry[]): unknown {
         valid_from: e.validity?.from ?? null,
         valid_until: e.validity?.until ?? null,
         realtime: f.realtime ?? null,
+        ...(f.buyTicketUrl ? { buyTicketUrl: f.buyTicketUrl } : {}),
         license: f.license,
       };
     }),

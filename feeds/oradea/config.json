@@ -1,4 +1,5 @@
 {
-  "_comment": "OTL SA Oradea. Source: Transitous resolves mdb-2101 (MobilityDatabase 'Oradea Transport Local'). No RT siblings in Transitous ro.json — realtime will be null until OTL SA publishes GTFS-RT.",
-  "enhances": "Oradea"
+  "_comment": "OTL SA Oradea. Source: Transitous resolves mdb-2101 (MobilityDatabase 'Oradea Transport Local'). No RT siblings in Transitous ro.json — realtime will be null until OTL SA publishes GTFS-RT. Tickets available via 24pay (com.twentyfourpay on Play Store / App Store).",
+  "enhances": "Oradea",
+  "buyTicketUrl": "https://apps.apple.com/ro/app/24pay/id1282006921"
 }

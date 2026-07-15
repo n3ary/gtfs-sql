@@ -145,6 +145,7 @@ async function projectFeedImpl(iso: string, raw: RawTransitousSource, override: 
     timezone?: string; languages?: string[]; realtime?: Realtime;
     source?: { type?: string; publisher?: string; url?: string };
     license?: { spdx_identifier?: string; attribution_text?: string; attribution_url?: string };
+    buyTicketUrl?: string;
     smoke?: { expectedPublisher?: string; tripIdPattern?: string };
   };
 
@@ -292,6 +293,7 @@ async function projectFeedImpl(iso: string, raw: RawTransitousSource, override: 
         attribution_text: c.license?.attribution_text ?? base.license.attribution_text,
         attribution_url: c.license?.attribution_url ?? base.license.attribution_url,
       },
+      buyTicketUrl: c.buyTicketUrl ?? null,
       _smoke: c.smoke ?? null,
     },
   };

@@ -115,6 +115,7 @@
             "service_alerts":    { "type": "string", "format": "uri" }
           }
         },
+        "buyTicketUrl": { "type": "string", "format": "uri", "description": "Optional link to the operator's ticket-purchase surface (e.g. 24pay, web shop). The app surfaces this on station views when set." },
         "license": {
           "type": "object",
           "required": ["attribution_text"],

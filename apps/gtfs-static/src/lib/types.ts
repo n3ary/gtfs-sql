@@ -33,6 +33,9 @@ export type Feed = {
   agencies: Agency[];
   realtime: Realtime | null;
   license: License;
+  /** Optional link to the operator's ticket-purchase surface (e.g. 24pay,
+   *  web shop, etc.). The app surfaces this on station views when set. */
+  buyTicketUrl?: string | null;
   _smoke?: { expectedPublisher?: string; tripIdPattern?: string } | null;
   _currentEtag?: string | null;
 };

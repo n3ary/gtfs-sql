@@ -363,7 +363,9 @@ export const SCHEMA: Record<string, SchemaSpec> = {
   calendar_dates: {
     file: 'calendar_dates.txt',
     columns: [
-      // Required. Foreign ID → calendar.service_id (or self-key if calendar.txt absent).
+      // Required. GTFS allows service_id here even if absent from calendar.txt.
+      // The trips FK → calendar is the primary integrity guard; calendar_dates
+      // is purely additive (exception dates only — no weekly schedule columns).
       ['service_id', 'TEXT NOT NULL'],
       // Required. YYYYMMDD format.
       ['date', 'TEXT NOT NULL',
@@ -372,9 +374,9 @@ export const SCHEMA: Record<string, SchemaSpec> = {
       ['exception_type', 'INTEGER NOT NULL',
         'CHECK(exception_type IN (1, 2))'],
     ],
-    foreignKeys: [
-      { columns: ['service_id'], refTable: 'calendar', refColumns: ['service_id'] },
-    ],
+    // No FK: GTFS spec permits calendar_dates.service_id to exist without a
+    // corresponding calendar.service_id. The trips → calendar FK catches any
+    // orphan service_ids during the main schedule load.
     indexes: [['calendar_dates_service_date_idx', '(service_id, date)']],
   },
   shapes: {

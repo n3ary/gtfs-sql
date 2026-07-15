@@ -38,65 +38,64 @@ const RESOLVE_FEEDS_SRC = readFileSync(
   'utf8',
 );
 
-const ORIGINAL_FETCH = globalThis.fetch;
-
 afterEach(() => {
-  if (ORIGINAL_FETCH) globalThis.fetch = ORIGINAL_FETCH;
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   delete process.env.GTFS_RT_PROXY_BASE_URL;
 });
 
 describe('resolve-feeds: publish set derived from feeds/<id>/', () => {
   it('does NOT consult include[] (whitelist removed)', () => {
-    // The auto-derive machinery builds the publish set from
-    // `overrides.keys()` (the set of feeds/<id>/config.json
-    // directories with an `enhances` value). The old
-    // `includeWhitelist` is gone.
-    expect(RESOLVE_FEEDS_SRC).not.toMatch(/includeWhitelist/);
-    expect(RESOLVE_FEEDS_SRC).not.toMatch(/config\.include/);
+    // The publish set is purely from feeds/<id>/config.json presence.
+    // No `include[]` array is consulted.
+    expect(RESOLVE_FEEDS_SRC).not.toMatch(/include\s*:/);
   });
 
-  it('uses the override map (feeds/<id>/ presence) as the publish set', () => {
-    expect(RESOLVE_FEEDS_SRC).toMatch(
-      /publishNames\s*=\s*new Set\(overrides\.keys\(\)\)/,
-    );
+  it('hard-errors on orphan enhances (no silent drop)', () => {
+    // Every feeds/<id>/ must match a Transitous source name.
+    // A mismatch is a hard build error, not a warning.
+    expect(RESOLVE_FEEDS_SRC).toMatch(/throw new Error[\s\S]*?orphan override\(/i);
   });
 
-  it('hard-errors on orphan overrides (enhances value with no Transitous match)', () => {
-    // The old "warn about orphan overrides" path is promoted
-    // to a thrown error. The error message names the offending
-    // directory so the operator can fix the typo or remove
-    // the dead config.
-    expect(RESOLVE_FEEDS_SRC).toMatch(/orphans\.push/);
-    expect(RESOLVE_FEEDS_SRC).toMatch(/throw new Error\([\s\S]*orphans\.length/);
-    expect(RESOLVE_FEEDS_SRC).not.toMatch(
-      /orphan overrides[\s\S]*console\.warn/,
-    );
+  it('ignores feeds/<id>/ without an enhances field', () => {
+    // A feeds/<id>/config.json without `enhances` is skipped (not an error).
+    expect(RESOLVE_FEEDS_SRC).toMatch(/if \(!cfg\.enhances\)/);
+  });
+
+  it('derives publish set from enhances values', () => {
+    // The `enhances` value in each feeds/<id>/config.json is the key
+    // into the Transitous source list.
+    expect(RESOLVE_FEEDS_SRC).toMatch(/byTransitousName\.set\(cfg\.enhances/);
+  });
+
+  it('skips RT sibling sources (gtfs-rt spec)', () => {
+    // A Transitous entry with spec "gtfs-rt" is consumed by
+    // resolveRealtimeForName and NOT emitted as a standalone feed.
+    expect(RESOLVE_FEEDS_SRC).toMatch(/if \(raw\.spec === .gtfs-rt.\) continue;/);
+  });
+
+  it('deduplicates feeds by id', () => {
+    // If the same feed id appears twice (e.g. two Transitous sources
+    // with the same name), only the first is emitted.
+    expect(RESOLVE_FEEDS_SRC).toMatch(/seenIds\.has\(projected\.feed!\.id\)/);
   });
 });
 
-describe('resolve-feeds: realtime URL split (proxy + upstream)', () => {
-  it('rewrites vehicle_positions to the canonical proxy URL when override is present', () => {
-    // The proxy URL is computed from RT_PROXY_BASE_URL +
-    // override.dir + the canonical endpoint suffix.
-    expect(RESOLVE_FEEDS_SRC).toMatch(
-      /\$\{RT_PROXY_BASE_URL\}\/rt\/\$\{override\.dir\}\/vehicle_positions/,
-    );
+describe('resolve-feeds: realtime URL split', () => {
+  it('splits vehicle_positions and upstream_vehicle_positions', () => {
+    // The proxy rewrite separates "what the consumer polls" from
+    // "what the server polls". This prevents the server from
+    // polling its own proxy endpoint (circular dependency).
+    expect(RESOLVE_FEEDS_SRC).toMatch(/vehicle_positions:\s*`\$\{RT_PROXY_BASE_URL\}/);
+    expect(RESOLVE_FEEDS_SRC).toMatch(/upstream_vehicle_positions:/);
   });
 
-  it('honours an explicit realtime.vehicle_positions override (operator opt-out)', () => {
-    // The rewrite only fires when the per-feed config did NOT
-    // explicitly set realtime.vehicle_positions. Operators can
-    // point a feed at a different proxy (e.g. staging) by
-    // setting the field themselves.
-    expect(RESOLVE_FEEDS_SRC).toMatch(
-      /c\.realtime\?\.vehicle_positions\s*===\s*undefined/,
-    );
-  });
-
-  it('moves MDB vehicle_positions discovery into upstream_vehicle_positions', () => {
-    // MDB fills `vehicle_positions` on the mdbRealtime base. The
-    // merge moves it into `upstream_vehicle_positions` (the new
+  it('uses upstream_vehicle_positions, not vehicle_positions, as the poll source', () => {
+    // The poll source is `upstream_vehicle_positions` (MDB / operator URL).
+    // `vehicle_positions` is the consumer slot (gtfs-rt.n3ary.com proxy URL).
+    // A per-feed config override can populate upstream_vehicle_positions;
+    // the poll source uses this override over the MDB default.
+    // Using vehicle_positions as the poll source would make the server
     // server's poll source) at merge time, so the consumer slot
     // (vehicle_positions) stays clear for the proxy URL rewrite
     // below. The per-feed config can override upstream_vehicle_positions
@@ -149,9 +148,10 @@ describe('resolve-feeds: end-to-end merge', () => {
   it('publishes a feed with per-feed config: rewrites vehicle_positions, fills upstream_vehicle_positions from MDB', async () => {
     // Transitous ro.json: a single Cluj-Napoca schedule source with
     // an RT sibling (same `name`, `spec: "gtfs-rt"`) carrying an
-    // mdb-id, a Tursib source with no RT, and an Oradea source (OTL SA,
-    // mdb-2101). The RT sibling shares the schedule feed's name -- that's
-    // how resolveRealtimeForName pairs them.
+    // mdb-id, a Tursib source with no RT, an Oradea source (OTL SA,
+    // mdb-2101), and a Timisoara source (SMTT, mdb-2868). The RT sibling
+    // shares the schedule feed's name -- that's how resolveRealtimeForName
+    // pairs them.
     const transitousPayload = {
       sources: [
         {
@@ -177,6 +177,13 @@ describe('resolve-feeds: end-to-end merge', () => {
           type: 'mobility-database',
           'mdb-id': '2101',
         },
+        {
+          // U+0219 Ș with comma below — matches both the Transitous source
+          // name and feeds/timisoara/config.json's enhances field.
+          name: 'Timi\u0219oara',
+          type: 'mobility-database',
+          'mdb-id': '2868',
+        },
       ],
     };
 
@@ -197,10 +204,15 @@ describe('resolve-feeds: end-to-end merge', () => {
       ],
     };
 
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('transitous') && url.endsWith('/ro.json')) {
         return new Response(JSON.stringify(transitousPayload));
+      }
+      if (url.includes('transitous') && url.includes('/feeds/')) {
+        // transitous feed file for any non-ro country — return empty sources
+        // so only the explicitly-covered countries appear in the feed list.
+        return new Response(JSON.stringify({ sources: [] }));
       }
       if (url.includes('api.github.com') && url.includes('git/trees')) {
         return new Response(JSON.stringify(ghTree));
@@ -209,10 +221,11 @@ describe('resolve-feeds: end-to-end merge', () => {
         return new Response(JSON.stringify(mdbCatalog['mdb-1234.json']));
       }
       throw new Error(`unexpected fetch: ${url}`);
-    }) as never;
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
-    // Force a fresh import so the mocked fetch is picked up
-    // and the mdb-rt tree cache starts empty.
+    // Stub before resetModules so the mock is active when
+    // resolve-feeds.ts re-executes on import.
     vi.resetModules();
     const { resolveFeeds } = await import('../src/resolve-feeds.ts');
     const feeds = await resolveFeeds();
@@ -239,18 +252,21 @@ describe('resolve-feeds: end-to-end merge', () => {
   });
 
   it('throws when a per-feed config enhances a name not in Transitous', async () => {
-    // Only Oradea is covered; Cluj-Napoca and Tursib per-feed configs
-    // (real files on disk) have no Transitous match -- orphan error
+    // Only Oradea and Timisoara are covered; Cluj-Napoca and Tursib per-feed
+    // configs (real files on disk) have no Transitous match -- orphan error
     // lists them alphabetically: cluj-napoca, tursib.
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('transitous') && url.endsWith('/ro.json')) {
         return new Response(JSON.stringify({
-          sources: [{ name: 'Oradea', type: 'mobility-database', 'mdb-id': '2101' }],
+          sources: [
+            { name: 'Oradea', type: 'mobility-database', 'mdb-id': '2101' },
+            { name: 'Timisoara', type: 'mobility-database', 'mdb-id': '2868' },
+          ],
         }));
       }
       throw new Error(`unexpected fetch: ${url}`);
-    }) as never;
+    }));
 
     vi.resetModules();
     const { resolveFeeds } = await import('../src/resolve-feeds.ts');

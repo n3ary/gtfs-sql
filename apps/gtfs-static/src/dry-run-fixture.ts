@@ -104,6 +104,12 @@ export function buildDryRunGtfsZip(outputDir: string, feedId: string, buildDate:
       { name: 'stop_times.txt' },
     );
 
+    // calendar_dates.txt — empty is valid; services are fully defined in calendar.txt above.
+    archive.append(
+      'service_id,date,exception_type\n',
+      { name: 'calendar_dates.txt' },
+    );
+
     archive.finalize();
   });
 }

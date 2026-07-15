@@ -308,16 +308,4 @@ describe('FOREIGN KEY constraints (Layer 2: referential integrity)', () => {
     }
   });
 
-  it('rejects calendar_dates.service_id that does not exist in calendar', () => {
-    const db = new DatabaseSync(':memory:');
-    try {
-      db.exec(SCHEMA_SQL);
-      db.exec('PRAGMA foreign_keys = ON;');
-      expect(() =>
-        db.prepare("INSERT INTO calendar_dates (service_id, date, exception_type) VALUES ('SVC_GHOST', '20260701', 1)").run()
-      ).toThrow(/FOREIGN KEY constraint failed/);
-    } finally {
-      db.close();
-    }
-  });
 });

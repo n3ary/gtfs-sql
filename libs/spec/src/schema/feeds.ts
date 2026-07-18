@@ -21,6 +21,7 @@ const SourceSchema = z
     publisher: z.string().min(1),
     upstream_url: z.string().url().nullable(),
     upstream_etag: z.string().nullable().optional(),
+    zip_hash: z.string().nullable().optional(),
   })
   .strict();
 
